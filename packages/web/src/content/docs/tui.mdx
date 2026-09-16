@@ -143,6 +143,23 @@ Export current conversation to Markdown and open in your default editor. Uses th
 
 ---
 
+### cost
+
+Show the current session's estimated USD cost and input/output token totals, grouped by provider and model.
+
+```bash
+/cost
+```
+
+The estimate includes earlier turns and compaction summaries, even when they are no longer visible in the conversation.
+Input totals include cached tokens; output totals include reasoning tokens. Costs use the recorded charge for each model
+step, including cache rates and context pricing tiers, rather than recalculating old turns using current prices.
+The prompt status bar and Context sidebar also update as model steps finish.
+
+Models with zero rates and no recorded charge show `n/a`, since the provider catalogue does not distinguish free models
+from missing pricing. If any model's estimate is unavailable, the session total also shows `n/a`; it never presents a
+partial cost as the full total. This is an estimate for the current session, not a provider invoice or account balance.
+
 ### help
 
 Show the help dialog.
