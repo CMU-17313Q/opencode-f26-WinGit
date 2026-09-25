@@ -7,10 +7,21 @@ import { streamText } from "ai"
 
 const MAX_CONTENT_CHARS = 20_000
 
-export const summarizeFile = (input: { provider: Provider.Interface; path: string; content: string }) =>
+// `model` is the session's active model. It is preferred over the configured
+// default so the summary uses a provider/credential the user actually chose for
+// this run, rather than whichever provider happens to be the global default.
+export const summarizeFile = (input: {
+  provider: Provider.Interface
+  model?: Provider.Model
+  path: string
+  content: string
+}) =>
   Effect.gen(function* () {
-    const { providerID, modelID } = yield* input.provider.defaultModel()
-    const model = (yield* input.provider.getSmallModel(providerID)) ?? (yield* input.provider.getModel(providerID, modelID))
+    const model =
+      input.model ??
+      (yield* input.provider.defaultModel().pipe(
+        Effect.flatMap((selected) => input.provider.getModel(selected.providerID, selected.modelID)),
+      ))
     const language = yield* input.provider.getLanguage(model)
     const content =
       input.content.length > MAX_CONTENT_CHARS

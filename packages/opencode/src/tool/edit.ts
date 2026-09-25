@@ -147,9 +147,12 @@ export const EditTool = Tool.define(
                 ),
               )
               if (EditSummaryFlag.isEnabled()) {
-                const summary = yield* EditSummary.summarizeFile({ provider, path: filePath, content: contentOld }).pipe(
-                  Effect.catch(() => Effect.succeed(undefined)),
-                )
+                const summary = yield* EditSummary.summarizeFile({
+                  provider,
+                  model: ctx.extra?.model as Provider.Model | undefined,
+                  path: filePath,
+                  content: contentOld,
+                }).pipe(Effect.catch(() => Effect.succeed(undefined)))
                 yield* ctx.metadata({ metadata: summary ? { summary } : { summaryFailed: true } })
               }
               yield* ctx.ask({
