@@ -18,6 +18,9 @@ import { Snapshot } from "@/snapshot"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Bom from "@/util/bom"
+import { Provider } from "@/provider/provider"
+import { EditSummary } from "./edit-summary"
+import { EditSummaryFlag } from "./edit-summary-flag"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -62,6 +65,7 @@ export const EditTool = Tool.define(
     const afs = yield* FSUtil.Service
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
+    const provider = yield* Provider.Service
 
     return {
       description: DESCRIPTION,
@@ -142,6 +146,15 @@ export const EditTool = Tool.define(
                   normalizeLineEndings(contentNew),
                 ),
               )
+              if (EditSummaryFlag.isEnabled()) {
+                const summary = yield* EditSummary.summarizeFile({
+                  provider,
+                  model: ctx.extra?.model as Provider.Model | undefined,
+                  path: filePath,
+                  content: contentOld,
+                }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+                yield* ctx.metadata({ metadata: summary ? { summary } : { summaryFailed: true } })
+              }
               yield* ctx.ask({
                 permission: "edit",
                 patterns: [path.relative(instance.worktree, filePath)],
