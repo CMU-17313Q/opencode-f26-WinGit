@@ -17,6 +17,7 @@ export function DialogContextFiles(props: DialogContextFilesProps) {
   const sync = useSync()
   const { theme } = useTheme()
   const dialog = useDialog()
+  dialog.setSize("large")
 
   const rows = createMemo(() => {
     const messages = sync.data.message[props.sessionID] ?? []
