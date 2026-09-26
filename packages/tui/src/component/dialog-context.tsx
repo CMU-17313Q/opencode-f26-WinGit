@@ -3,10 +3,14 @@ import { For, Show, createMemo } from "solid-js"
 import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
 import { useSync } from "../context/sync"
-import { contextFiles } from "../util/context-files"
+import { contextFiles, type ContextFile } from "../util/context-files"
 
 export type DialogContextFilesProps = {
   sessionID: string
+}
+
+export function contextFileRows(files: readonly ContextFile[]) {
+  return files.map((file) => ({ path: file.path, size: `~${file.tokens.toLocaleString("en-US")} tokens` }))
 }
 
 export function DialogContextFiles(props: DialogContextFilesProps) {
@@ -14,9 +18,9 @@ export function DialogContextFiles(props: DialogContextFilesProps) {
   const { theme } = useTheme()
   const dialog = useDialog()
 
-  const files = createMemo(() => {
+  const rows = createMemo(() => {
     const messages = sync.data.message[props.sessionID] ?? []
-    return contextFiles(messages.flatMap((message) => sync.data.part[message.id] ?? []))
+    return contextFileRows(contextFiles(messages.map((info) => ({ info, parts: sync.data.part[info.id] ?? [] }))))
   })
 
   return (
@@ -29,16 +33,16 @@ export function DialogContextFiles(props: DialogContextFilesProps) {
           esc
         </text>
       </box>
-      <Show when={files().length > 0} fallback={<text fg={theme.textMuted}>No files in context</text>}>
+      <Show when={rows().length > 0} fallback={<text fg={theme.textMuted}>No files in context</text>}>
         <box>
-          <For each={files()}>
-            {(item) => (
+          <For each={rows()}>
+            {(row) => (
               <box flexDirection="row" gap={1} justifyContent="space-between">
                 <text fg={theme.text} wrapMode="none">
-                  {item.path}
+                  {row.path}
                 </text>
                 <text fg={theme.textMuted} flexShrink={0}>
-                  ~{item.tokens.toLocaleString()} tokens
+                  {row.size}
                 </text>
               </box>
             )}
