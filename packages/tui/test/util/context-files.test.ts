@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test"
 import type { Message, Part } from "@opencode-ai/sdk/v2"
 import { contextFiles, type MessageWithParts } from "../../src/util/context-files"
 
-function tool(name: string, filePath: string | undefined, output = "") {
+function tool(name: string, filePath: string | undefined, output = "", input: Record<string, string> = {}) {
   return {
     type: "tool",
     tool: name,
     state: {
       status: "completed",
-      input: filePath === undefined ? {} : { filePath },
+      input: filePath === undefined ? input : { filePath, ...input },
       output,
     },
   } as Part
@@ -93,6 +93,26 @@ describe("util.contextFiles", () => {
       "b.ts",
       "c.ts",
     ])
+  })
+
+  test("keeps the read size when a file is edited after it was read", () => {
+    const messages = [
+      assistant("m1", tool("read", "a.ts", "x".repeat(400))),
+      assistant("m2", tool("edit", "a.ts", "Edit applied successfully.", { newString: "y" })),
+    ]
+    expect(contextFiles(messages)).toEqual([{ path: "a.ts", tokens: 100 }])
+  })
+
+  test("sizes a written file from the content written, not the tool reply", () => {
+    const messages = [assistant("m1", tool("write", "a.ts", "Wrote file successfully.", { content: "x".repeat(200) }))]
+    expect(contextFiles(messages)).toEqual([{ path: "a.ts", tokens: 50 }])
+  })
+
+  test("sizes a file that was only edited from the new text", () => {
+    const messages = [
+      assistant("m1", tool("edit", "a.ts", "Edit applied successfully.", { newString: "x".repeat(80) })),
+    ]
+    expect(contextFiles(messages)).toEqual([{ path: "a.ts", tokens: 20 }])
   })
 
   test("skips tool calls that have not completed", () => {

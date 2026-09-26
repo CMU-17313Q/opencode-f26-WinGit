@@ -46,9 +46,15 @@ export function contextFiles(messages: readonly MessageWithParts[]): ContextFile
       const path = part.state.input?.["filePath"]
       if (typeof path !== "string" || path.length === 0) continue
 
-      files.set(path, Math.ceil((part.state.output?.length ?? 0) / CHARS_PER_TOKEN))
+      if (part.tool === "read") files.set(path, estimate(part.state.output))
+      else if (part.tool === "write") files.set(path, estimate(part.state.input["content"]))
+      else if (!files.has(path)) files.set(path, estimate(part.state.input["newString"]))
     }
   }
 
   return Array.from(files, ([path, tokens]) => ({ path, tokens }))
+}
+
+function estimate(text: unknown) {
+  return typeof text === "string" ? Math.ceil(text.length / CHARS_PER_TOKEN) : 0
 }
