@@ -15,6 +15,8 @@ import { SessionID, MessageID } from "../../src/session/schema"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { Config } from "@/config/config"
+import { Vcs } from "@/project/vcs"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-write-session"),
@@ -41,6 +43,8 @@ const it = testEffect(
       CrossSpawnSpawner.node,
       Truncate.node,
       Agent.node,
+      Config.node,
+      Vcs.node,
     ]),
   ),
 )
