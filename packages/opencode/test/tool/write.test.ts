@@ -446,5 +446,56 @@ describe("tool.write", () => {
         }),
       { git: true },
     )
+
+    it.instance(
+      "does not ask for protected branch confirmation outside a Git repository",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "nongit.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "non-git content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeUndefined()
+          expect(yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))).toBe("non-git content")
+        }),
+    )
+
+    it.instance(
+      "does not ask for protected branch confirmation in detached HEAD state",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+
+          yield* Effect.promise(() => $`git checkout --detach HEAD`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "detached.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "detached head content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeUndefined()
+          expect(yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))).toBe("detached head content")
+        }),
+      { git: true },
+    )
   })
 })
