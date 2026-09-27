@@ -322,6 +322,9 @@ describe("tool.write", () => {
           expect(request?.patterns).toEqual(["main"])
           expect(request?.always).toEqual([])
           expect(request?.metadata.branch).toBe("main")
+          
+          const content = yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))
+          expect(content).toBe("protected branch content")
         }),
       { git: true },
     )
@@ -494,6 +497,33 @@ describe("tool.write", () => {
 
           expect(request).toBeUndefined()
           expect(yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))).toBe("detached head content")
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "asks for confirmation before writing on master",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M master`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "master.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "master branch content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeDefined()
+          expect(request?.patterns).toEqual(["master"])
+          expect(request?.metadata.branch).toBe("master")
         }),
       { git: true },
     )
