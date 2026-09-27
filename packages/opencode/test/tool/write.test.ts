@@ -18,6 +18,7 @@ import { testEffect } from "../lib/effect"
 import { Config } from "@/config/config"
 import { Vcs } from "@/project/vcs"
 import { $ } from "bun"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-write-session"),
@@ -346,6 +347,102 @@ describe("tool.write", () => {
           const request = requests.find((item) => item.permission === "protected_branch")
 
           expect(request).toBeUndefined()
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "respects custom protected branch configuration",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M production`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "production.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "production content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeDefined()
+          expect(request?.patterns).toEqual(["production"])
+          expect(request?.metadata.branch).toBe("production")
+        }),
+      {
+        git: true,
+        config: {
+          protected_branches: ["production"],
+        },
+      },
+    )
+
+    it.instance(
+      "does not use default protected branches when custom configuration is provided",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M main`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "main.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "main content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeUndefined()
+        }),
+      {
+        git: true,
+        config: {
+          protected_branches: ["production"],
+        },
+      },
+    )
+  
+    it.instance(
+      "does not modify the file when protected branch confirmation is rejected",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M main`.cwd(test.directory).quiet())
+
+          const filepath = path.join(test.directory, "existing.txt")
+          yield* Effect.promise(() => fs.writeFile(filepath, "original content", "utf-8"))
+
+          const rejectingCtx: Tool.Context = {
+            ...ctx,
+            ask: (request) =>
+              request.permission === "protected_branch"
+                ? Effect.die(new PermissionV1.RejectedError())
+                : Effect.void,
+          }
+
+          const exit = yield* run(
+            {
+              filePath: filepath,
+              content: "changed content",
+            },
+            rejectingCtx,
+          ).pipe(Effect.exit)
+
+          expect(exit._tag).toBe("Failure")
+
+          const content = yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))
+          expect(content).toBe("original content")
         }),
       { git: true },
     )
