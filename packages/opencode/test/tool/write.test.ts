@@ -17,6 +17,7 @@ import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { Config } from "@/config/config"
 import { Vcs } from "@/project/vcs"
+import { $ } from "bun"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-write-session"),
@@ -27,6 +28,20 @@ const ctx = {
   messages: [],
   metadata: () => Effect.void,
   ask: () => Effect.void,
+}
+
+function makeRecordingCtx() {
+  const requests: Parameters<Tool.Context["ask"]>[0][] = []
+
+  const next: Tool.Context = {
+    ...ctx,
+    ask: (request) =>
+      Effect.sync(() => {
+        requests.push(request)
+      }),
+  }
+
+  return { requests, ctx: next }
 }
 
 afterEach(async () => {
@@ -278,6 +293,61 @@ describe("tool.write", () => {
         const result = yield* run({ filePath: filepath, content: "export const Button = () => {}" })
         expect(result.title).toEndWith(path.join("src", "components", "Button.tsx"))
       }),
+    )
+  })
+
+  describe("protected branch safeguard", () => {
+    it.instance(
+      "asks for confirmation before writing on main",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M main`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "protected.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "protected branch content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeDefined()
+          expect(request?.patterns).toEqual(["main"])
+          expect(request?.always).toEqual([])
+          expect(request?.metadata.branch).toBe("main")
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "does not ask for protected branch confirmation on a feature branch",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M feature/test`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "feature.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "feature branch content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeUndefined()
+        }),
+      { git: true },
     )
   })
 })
