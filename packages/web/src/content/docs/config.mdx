@@ -640,7 +640,23 @@ For large repositories or projects with many submodules, the snapshot system can
 
 Note that disabling snapshots means changes made by the agent cannot be rolled back through the UI.
 
+
 ---
+
+### Protected branches
+
+OpenCode can warn before modifying files on protected Git branches. By default, `main`, `master`, and `develop` are treated as protected branches.
+
+You can customize the protected branch list using the `protected_branches` option.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "protected_branches": ["main", "production"]
+}
+
+---
+
 
 ### Autoupdate
 
