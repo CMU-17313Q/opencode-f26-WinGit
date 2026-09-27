@@ -466,11 +466,13 @@ it.instance("Agent.get returns undefined for non-existent agent", () =>
   }),
 )
 
-it.instance("default permission includes doom_loop and external_directory as ask", () =>
+it.instance("default permission includes protected safeguards as ask", () =>
   Effect.gen(function* () {
     const build = yield* load((svc) => svc.get("build"))
+
     expect(evalPerm(build, "doom_loop")).toBe("ask")
     expect(evalPerm(build, "external_directory")).toBe("ask")
+    expect(evalPerm(build, "protected_branch")).toBe("ask")
   }),
 )
 

@@ -15,6 +15,9 @@ import { SessionID, MessageID } from "../../src/session/schema"
 import * as Tool from "../../src/tool/tool"
 import { testEffect } from "../lib/effect"
 import { Watcher } from "@opencode-ai/core/filesystem/watcher"
+import { Config } from "@/config/config"
+import { Vcs } from "@/project/vcs"
+import { $ } from "bun"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-edit-session"),
@@ -27,12 +30,35 @@ const ctx = {
   ask: () => Effect.void,
 }
 
+function makeRecordingCtx() {
+  const requests: Parameters<Tool.Context["ask"]>[0][] = []
+
+  const next: Tool.Context = {
+    ...ctx,
+    ask: (request) =>
+      Effect.sync(() => {
+        requests.push(request)
+      }),
+  }
+
+  return { requests, ctx: next }
+}
+
 afterEach(async () => {
   await disposeAllInstances()
 })
 
 const layer = LayerNode.compile(
-  LayerNode.group([LSP.node, FSUtil.node, Format.node, EventV2Bridge.node, Truncate.node, Agent.node]),
+  LayerNode.group([
+    LSP.node,
+    FSUtil.node,
+    Format.node,
+    EventV2Bridge.node,
+    Truncate.node,
+    Agent.node,
+    Config.node,
+    Vcs.node,
+  ]),
 )
 
 const it = testEffect(layer)
@@ -569,6 +595,67 @@ describe("tool.edit", () => {
 
         expect(yield* load(filepath)).toBe("top = 1\nmiddle = keep\nbottom = 2\n")
       }),
+    )
+  })
+
+  describe("protected branch safeguard", () => {
+    it.instance(
+      "asks for confirmation before editing on main",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M main`.cwd(test.directory).quiet())
+
+          const filepath = path.join(test.directory, "protected.txt")
+          yield* put(filepath, "old content")
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+
+          yield* run(
+            {
+              filePath: filepath,
+              oldString: "old content",
+              newString: "new content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeDefined()
+          expect(request?.patterns).toEqual(["main"])
+          expect(request?.always).toEqual([])
+          expect(request?.metadata.branch).toBe("main")
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "does not ask for protected branch confirmation on a feature branch",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M feature/test`.cwd(test.directory).quiet())
+
+          const filepath = path.join(test.directory, "feature.txt")
+          yield* put(filepath, "old content")
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+
+          yield* run(
+            {
+              filePath: filepath,
+              oldString: "old content",
+              newString: "new content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeUndefined()
+        }),
+      { git: true },
     )
   })
 })

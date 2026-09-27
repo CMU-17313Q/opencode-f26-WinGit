@@ -15,6 +15,10 @@ import { SessionID, MessageID } from "../../src/session/schema"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { Config } from "@/config/config"
+import { Vcs } from "@/project/vcs"
+import { $ } from "bun"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-write-session"),
@@ -25,6 +29,20 @@ const ctx = {
   messages: [],
   metadata: () => Effect.void,
   ask: () => Effect.void,
+}
+
+function makeRecordingCtx() {
+  const requests: Parameters<Tool.Context["ask"]>[0][] = []
+
+  const next: Tool.Context = {
+    ...ctx,
+    ask: (request) =>
+      Effect.sync(() => {
+        requests.push(request)
+      }),
+  }
+
+  return { requests, ctx: next }
 }
 
 afterEach(async () => {
@@ -41,6 +59,8 @@ const it = testEffect(
       CrossSpawnSpawner.node,
       Truncate.node,
       Agent.node,
+      Config.node,
+      Vcs.node,
     ]),
   ),
 )
@@ -274,6 +294,238 @@ describe("tool.write", () => {
         const result = yield* run({ filePath: filepath, content: "export const Button = () => {}" })
         expect(result.title).toEndWith(path.join("src", "components", "Button.tsx"))
       }),
+    )
+  })
+
+  describe("protected branch safeguard", () => {
+    it.instance(
+      "asks for confirmation before writing on main",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M main`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "protected.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "protected branch content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeDefined()
+          expect(request?.patterns).toEqual(["main"])
+          expect(request?.always).toEqual([])
+          expect(request?.metadata.branch).toBe("main")
+          
+          const content = yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))
+          expect(content).toBe("protected branch content")
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "does not ask for protected branch confirmation on a feature branch",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M feature/test`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "feature.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "feature branch content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeUndefined()
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "respects custom protected branch configuration",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M production`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "production.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "production content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeDefined()
+          expect(request?.patterns).toEqual(["production"])
+          expect(request?.metadata.branch).toBe("production")
+        }),
+      {
+        git: true,
+        config: {
+          protected_branches: ["production"],
+        },
+      },
+    )
+
+    it.instance(
+      "does not use default protected branches when custom configuration is provided",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M main`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "main.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "main content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeUndefined()
+        }),
+      {
+        git: true,
+        config: {
+          protected_branches: ["production"],
+        },
+      },
+    )
+  
+    it.instance(
+      "does not modify the file when protected branch confirmation is rejected",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M main`.cwd(test.directory).quiet())
+
+          const filepath = path.join(test.directory, "existing.txt")
+          yield* Effect.promise(() => fs.writeFile(filepath, "original content", "utf-8"))
+
+          const rejectingCtx: Tool.Context = {
+            ...ctx,
+            ask: (request) =>
+              request.permission === "protected_branch"
+                ? Effect.die(new PermissionV1.RejectedError())
+                : Effect.void,
+          }
+
+          const exit = yield* run(
+            {
+              filePath: filepath,
+              content: "changed content",
+            },
+            rejectingCtx,
+          ).pipe(Effect.exit)
+
+          expect(exit._tag).toBe("Failure")
+
+          const content = yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))
+          expect(content).toBe("original content")
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "does not ask for protected branch confirmation outside a Git repository",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "nongit.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "non-git content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeUndefined()
+          expect(yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))).toBe("non-git content")
+        }),
+    )
+
+    it.instance(
+      "does not ask for protected branch confirmation in detached HEAD state",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+
+          yield* Effect.promise(() => $`git checkout --detach HEAD`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "detached.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "detached head content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeUndefined()
+          expect(yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))).toBe("detached head content")
+        }),
+      { git: true },
+    )
+
+    it.instance(
+      "asks for confirmation before writing on master",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M master`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "master.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "master branch content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeDefined()
+          expect(request?.patterns).toEqual(["master"])
+          expect(request?.metadata.branch).toBe("master")
+        }),
+      { git: true },
     )
   })
 })

@@ -329,6 +329,23 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               }
             }
 
+            if (permission === "protected_branch") {
+              const meta = props.request.metadata ?? {}
+              const branch = typeof meta["branch"] === "string" ? meta["branch"] : props.request.patterns?.[0] ?? ""
+
+              return {
+                icon: "△",
+                title: `Protected branch: ${branch}`,
+                body: (
+                  <box paddingLeft={1}>
+                    <text fg={theme.text}>
+                      {`You are about to modify files directly on the protected branch "${branch}". Continue?`}
+                    </text>
+                  </box>
+                ),
+              }
+            }
+
             if (permission === "external_directory") {
               const meta = props.request.metadata ?? {}
               const parent = typeof meta["parentDir"] === "string" ? meta["parentDir"] : undefined
