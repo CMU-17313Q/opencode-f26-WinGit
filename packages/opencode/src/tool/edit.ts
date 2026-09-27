@@ -18,6 +18,9 @@ import { Snapshot } from "@/snapshot"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Bom from "@/util/bom"
+import { Config } from "@/config/config"
+import { Vcs } from "@/project/vcs"
+import { assertProtectedBranchEffect } from "./protected-branch"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -62,6 +65,8 @@ export const EditTool = Tool.define(
     const afs = yield* FSUtil.Service
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
+    const config = yield* Config.Service
+    const vcs = yield* Vcs.Service
 
     return {
       description: DESCRIPTION,
@@ -81,6 +86,8 @@ export const EditTool = Tool.define(
             ? params.filePath
             : path.join(instance.directory, params.filePath)
           yield* assertExternalDirectoryEffect(ctx, filePath)
+
+          yield* assertProtectedBranchEffect(ctx, vcs, config)
 
           let diff = ""
           let contentOld = ""
