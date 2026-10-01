@@ -444,6 +444,75 @@ const boot = Effect.fn("test.boot")(function* (input?: { title?: string }) {
 
 // Loop semantics
 
+for (const title of ["Generated title", ""]) {
+  it.instance(
+    `records automatic title usage independently of messages when title text is ${title ? "present" : "empty"}`,
+    () =>
+      Effect.gen(function* () {
+        const { llm } = yield* useServerConfig((url) => ({
+          ...providerCfg(url),
+          small_model: "test/title-model",
+          provider: {
+            test: {
+              ...providerCfg(url).provider.test,
+              models: {
+                ...cfg.provider.test.models,
+                "title-model": {
+                  ...cfg.provider.test.models["test-model"],
+                  id: "title-model",
+                  cost: { input: 2, output: 4 },
+                },
+              },
+            },
+          },
+        }))
+        const { sessions, prompt, chat } = yield* boot({})
+        yield* llm.pushMatch(
+          (hit) => hit.body.model === "title-model",
+          reply().text(title).usage({ input: 1000, output: 100 }).stop(),
+        )
+        yield* llm.pushMatch(
+          (hit) => hit.body.model === "test-model",
+          reply().text("Main reply").usage({ input: 10, output: 2 }).stop(),
+        )
+        yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "hello" }],
+        })
+        const result = yield* prompt.loop({ sessionID: chat.id })
+        const usage = yield* pollWithTimeout(
+          sessions
+            .auxiliaryUsage(chat.id)
+            .pipe(Effect.map((rows) => (rows[0]?.status === "complete" ? rows : undefined))),
+          "automatic title usage was not persisted",
+        )
+        expect(usage).toHaveLength(1)
+        expect(usage[0]).toMatchObject({
+          purpose: "title",
+          providerID: "test",
+          modelID: "title-model",
+          cost: 0.0024,
+          tokens: { input: 1000, output: 100 },
+        })
+        expect(result.info.role).toBe("assistant")
+        if (result.info.role === "assistant") expect(result.info.tokens.input).toBe(10)
+        const messages = yield* sessions.messages({ sessionID: chat.id })
+        expect(messages.filter((message) => message.info.role === "assistant")).toHaveLength(1)
+        expect(yield* llm.hits).toHaveLength(2)
+        if (title) {
+          yield* pollWithTimeout(
+            sessions.get(chat.id).pipe(Effect.map((session) => (session.title === title ? true : undefined))),
+            "title was not saved",
+          )
+        }
+        expect(yield* sessions.auxiliaryUsage(chat.id)).toEqual(usage)
+      }),
+  )
+}
+
 noLLMServer.instance(
   "loop exits immediately when last assistant has stop finish",
   () =>

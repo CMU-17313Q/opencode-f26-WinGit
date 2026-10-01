@@ -523,6 +523,27 @@ const SessionTokens = Schema.Struct({
   }),
 })
 
+export const AuxiliaryRequestID = Schema.String.check(Schema.isStartsWith("aux_")).pipe(
+  Schema.brand("SessionV1.AuxiliaryRequestID"),
+  statics((schema) => ({ create: () => schema.make("aux_" + ascending()) })),
+)
+export type AuxiliaryRequestID = typeof AuxiliaryRequestID.Type
+
+export interface AuxiliaryUsage extends Schema.Schema.Type<typeof AuxiliaryUsage> {}
+export const AuxiliaryUsage = Schema.Struct({
+  id: Schema.String,
+  sessionID: SessionID,
+  requestID: AuxiliaryRequestID,
+  step: NonNegativeInt,
+  purpose: Schema.Literal("title"),
+  providerID: Provider.ID,
+  modelID: Model.ID,
+  status: Schema.Literals(["pending", "complete", "unavailable"]),
+  cost: optional(Schema.Finite),
+  tokens: optional(Schema.Struct({ ...SessionTokens.fields, total: optional(Schema.Finite) })),
+  time: Schema.Struct({ created: Timestamp, updated: Timestamp }),
+}).annotate({ identifier: "AuxiliaryUsage" })
+
 const SessionShare = Schema.Struct({
   url: Schema.String,
 })
@@ -627,6 +648,11 @@ const events = {
       partID: PartID,
     },
   }),
+  AuxiliaryUsageUpdated: define({
+    type: "session.auxiliary_usage.updated",
+    ...options,
+    schema: { sessionID: SessionID, usage: AuxiliaryUsage },
+  }),
 }
 
 export const PartDelta = define({
@@ -669,6 +695,7 @@ export const Event = {
     events.MessageRemoved,
     events.PartUpdated,
     events.PartRemoved,
+    events.AuxiliaryUsageUpdated,
     PartDelta,
     Diff,
     Error,
