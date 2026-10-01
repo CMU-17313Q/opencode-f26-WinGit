@@ -3,6 +3,7 @@ import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo } from "solid-js"
 import { useSessionCost } from "../../context/session-cost"
+import { useLocal } from "../../context/local"
 import { formatCost } from "../../util/session-cost"
 
 const id = "internal:sidebar-context"
@@ -11,6 +12,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const theme = () => props.api.theme.current
   const msg = createMemo(() => props.api.state.session.messages(props.session_id))
   const cost = useSessionCost(() => props.session_id)
+  const local = useLocal()
 
   const state = createMemo(() => {
     const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
@@ -23,7 +25,10 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
 
     const tokens =
       last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
+    const selected = local.model.current()
+    const model = selected
+      ? props.api.state.provider.find((item) => item.id === selected.providerID)?.models[selected.modelID]
+      : undefined
     return {
       tokens,
       percent: model?.limit.context ? Math.round((tokens / model.limit.context) * 100) : null,

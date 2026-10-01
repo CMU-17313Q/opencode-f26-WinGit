@@ -9,7 +9,7 @@ import { tmpdir } from "./fixture/fixture"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 
-test("all cost views share one history load, update live, and stay isolated when switching sessions", async () => {
+test("cost views share usage and context percentages follow model selection across session changes", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")
   const setup = await createTestRenderer({ width: 150, height: 40, useThread: false })
@@ -55,6 +55,13 @@ test("all cost views share one history load, update live, and stay isolated when
         release_date: "2026-01-01",
       },
     },
+  }
+  provider.models.small = {
+    ...provider.models.model!,
+    id: "small",
+    name: "Small window",
+    api: { ...provider.models.model!.api, id: "small" },
+    limit: { context: 200, output: 100 },
   }
   const tokens = { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } }
   const info: AssistantMessage = {
@@ -137,6 +144,19 @@ test("all cost views share one history load, update live, and stay isolated when
     throw new Error(`Expected app frame to contain ${text}:\n${frame}`)
   }
 
+  async function selectModel(name: string) {
+    api!.keymap.dispatchCommand("model.list")
+    await frameContaining("Select model")
+    const started = Date.now()
+    while (!(setup.renderer.currentFocusedEditor instanceof core.InputRenderable)) {
+      if (Date.now() - started > 2000) throw new Error("model search did not receive focus")
+      await Bun.sleep(1)
+    }
+    await setup.mockInput.typeText(name)
+    await frameContaining(name)
+    setup.mockInput.pressEnter()
+  }
+
   try {
     const { run } = await import("../src/app")
     task = Effect.runPromise(
@@ -202,6 +222,23 @@ test("all cost views share one history load, update live, and stay isolated when
     expect(initial).toContain("120 / 10.0K (1%) · $0.0125 est.")
     expect(initial).toContain("Context")
     expect(initial).toContain("120 tokens")
+    expect(historyLoads).toEqual([session.id])
+    expect(auxiliaryLoads).toEqual([session.id])
+    expect(initial).toContain("1% used")
+
+    await selectModel("Small window")
+    const smaller = await frameContaining("120 / 200 (60%) · $0.0125 est.")
+    expect(smaller).toContain("60% used")
+    expect(smaller).toContain("120 tokens")
+    expect(smaller).toContain("$0.0125 estimated")
+    expect(historyLoads).toEqual([session.id])
+    expect(auxiliaryLoads).toEqual([session.id])
+
+    await selectModel("Fixture model")
+    const restored = await frameContaining("120 / 10.0K (1%) · $0.0125 est.")
+    expect(restored).toContain("1% used")
+    expect(restored).toContain("120 tokens")
+    expect(restored).toContain("$0.0125 estimated")
     expect(historyLoads).toEqual([session.id])
     expect(auxiliaryLoads).toEqual([session.id])
 

@@ -159,9 +159,9 @@ Feature: [Issue #5](https://github.com/CMU-17313Q/opencode-f26-WinGit/issues/5),
 
 Start a TUI session with `bun dev .`. The status bar under the prompt shows used tokens, the selected model's context-window limit and a rounded percentage. It turns yellow when that displayed percentage reaches 80%. The latest assistant response with output usage supplies input, output, reasoning and cached tokens. Earlier responses are not summed because each request includes the conversation again. A response without output usage keeps the previous value; an empty session starts at zero.
 
-To check it, send a short prompt, switch to a model with a different context limit, then use `/compact`. The percentage should recalculate immediately on the model switch. Usage may fall after compaction. An unknown context limit cannot produce a meaningful percentage. This meter describes conversation context; the USD estimate separately includes recorded title and summary calls.
+To check it, send a short prompt, switch to a model with a different context limit, then use `/compact`. The status bar and Context sidebar percentages should recalculate immediately and agree on the model switch. Usage may fall after compaction. An unknown context limit cannot produce a meaningful percentage. This meter describes conversation context; the USD estimate separately includes recorded title and summary calls.
 
-From `packages/tui`, run `bun test test/util/context-usage.test.ts test/session-cost-app.test.tsx` and `bun typecheck`. The helper tests cover the latest response, missing usage, compaction, cached tokens, model limits and the warning threshold. The application test checks that the meter and session cost remain visible together.
+From `packages/tui`, run `bun test test/util/context-usage.test.ts test/session-cost-app.test.tsx` and `bun typecheck`. The helper tests cover the latest response, missing usage, compaction, cached tokens, model limits and the warning threshold. The application test uses the model picker to switch between 10,000-token and 200-token windows and checks matching status bar/sidebar percentages, unchanged cost and one history load per session.
 
 ## Protected branch warning
 
