@@ -65,6 +65,19 @@ export const SessionTable = sqliteTable(
   ],
 )
 
+export const SessionAuxiliaryUsageTable = sqliteTable(
+  "session_auxiliary_usage",
+  {
+    id: text().primaryKey(),
+    session_id: text()
+      .$type<SessionSchema.ID>()
+      .notNull()
+      .references(() => SessionTable.id, { onDelete: "cascade" }),
+    data: text({ mode: "json" }).notNull().$type<SessionV1.AuxiliaryUsage>(),
+  },
+  (table) => [index("session_auxiliary_usage_session_idx").on(table.session_id)],
+)
+
 export const MessageTable = sqliteTable(
   "message",
   {

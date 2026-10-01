@@ -14,6 +14,9 @@ import DESCRIPTION from "./apply_patch.txt"
 import { FileSystem } from "@opencode-ai/core/filesystem"
 import { Format } from "../format"
 import * as Bom from "@/util/bom"
+import { Config } from "@/config/config"
+import { Vcs } from "@/project/vcs"
+import { assertProtectedBranchEffect } from "./protected-branch"
 
 export const Parameters = Schema.Struct({
   patchText: Schema.String.annotate({ description: "The full patch text that describes all changes to be made" }),
@@ -26,6 +29,8 @@ export const ApplyPatchTool = Tool.define(
     const afs = yield* FSUtil.Service
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
+    const config = yield* Config.Service
+    const vcs = yield* Vcs.Service
 
     const run = Effect.fn("ApplyPatchTool.execute")(function* (
       params: Schema.Schema.Type<typeof Parameters>,
@@ -200,6 +205,9 @@ export const ApplyPatchTool = Tool.define(
         deletions: change.deletions,
         movePath: change.movePath,
       }))
+
+      // Check protected branch before applying any file changes
+      yield* assertProtectedBranchEffect(ctx, vcs, config)
 
       // Check permissions if needed
       const relativePaths = fileChanges.map((c) => path.relative(instance.worktree, c.filePath).replaceAll("\\", "/"))

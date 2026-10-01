@@ -14,6 +14,9 @@ import { InstanceState } from "@/effect/instance-state"
 import { trimDiff } from "./edit"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import * as Bom from "@/util/bom"
+import { Config } from "@/config/config"
+import { Vcs } from "@/project/vcs"
+import { assertProtectedBranchEffect } from "./protected-branch"
 
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
 
@@ -31,6 +34,8 @@ export const WriteTool = Tool.define(
     const fs = yield* FSUtil.Service
     const events = yield* EventV2Bridge.Service
     const format = yield* Format.Service
+    const config = yield* Config.Service
+    const vcs = yield* Vcs.Service
 
     return {
       description: DESCRIPTION,
@@ -42,6 +47,8 @@ export const WriteTool = Tool.define(
             ? params.filePath
             : path.join(instance.directory, params.filePath)
           yield* assertExternalDirectoryEffect(ctx, filepath)
+
+          yield* assertProtectedBranchEffect(ctx, vcs, config)
 
           const exists = yield* fs.existsSafe(filepath)
           const source = exists ? yield* Bom.readFile(fs, filepath) : { bom: false, text: "" }

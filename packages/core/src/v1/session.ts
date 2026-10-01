@@ -8,6 +8,8 @@ export {
   AgentPart,
   AgentPartInput,
   Assistant,
+  AuxiliaryRequestID,
+  AuxiliaryUsage,
   CompactionPart,
   Event,
   FilePart,

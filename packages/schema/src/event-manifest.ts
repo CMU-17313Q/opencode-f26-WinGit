@@ -55,7 +55,8 @@ const featureDefinitions = Event.inventory(
 )
 
 export const ServerDefinitions = Event.inventory(
-  ...foundationDefinitions,
+  // Auxiliary usage belongs to the active V1 session API, not current /api sessions.
+  ...foundationDefinitions.filter((definition) => definition.type !== SessionV1.Event.AuxiliaryUsageUpdated.type),
   ...featureDefinitions,
   ...SessionTodo.Event.Definitions,
 )

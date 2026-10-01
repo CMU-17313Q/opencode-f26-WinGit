@@ -642,6 +642,25 @@ Note that disabling snapshots means changes made by the agent cannot be rolled b
 
 ---
 
+### Protected branches
+
+OpenCode asks before the built-in `edit`, `write`, or `apply_patch` tools modify files on a configured protected Git branch. By default, `main`, `master`, and `develop` are treated as protected branches. This list is local configuration; it does not read GitHub branch protection settings or cover shell commands and other tools.
+
+You can replace the default list using the `protected_branches` option. An empty list disables the branch check.
+
+```json title="opencode.json"
+{
+  "$schema": "https://opencode.ai/config.json",
+  "protected_branches": ["main", "production"]
+}
+```
+
+The default `protected_branch` permission is `ask`. In the TUI, each request offers **Allow once** or **Reject**. It does not save an always-allow rule. Existing permission configuration can explicitly allow or deny `protected_branch`.
+
+Non-interactive `opencode run` rejects requests that need confirmation by default. With `--auto`, `--yolo`, or `--dangerously-skip-permissions`, it approves them once, including a known child task's branch request. The TUI's automatic approval mode also approves these requests without showing the confirmation. The branch warning therefore does not enforce protection when automatic approval is enabled. Use manual approval mode to see the warning, work on a feature branch, and review the resulting changes.
+
+---
+
 ### Autoupdate
 
 OpenCode will automatically download any new updates when it starts up. You can disable this with the `autoupdate` option.

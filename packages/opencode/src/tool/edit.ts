@@ -18,6 +18,13 @@ import { Snapshot } from "@/snapshot"
 import { assertExternalDirectoryEffect } from "./external-directory"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import * as Bom from "@/util/bom"
+import { Provider } from "@/provider/provider"
+import { EditSummary } from "./edit-summary"
+import { EditSummaryFlag } from "./edit-summary-flag"
+import { Session } from "@/session/session"
+import { Config } from "@/config/config"
+import { Vcs } from "@/project/vcs"
+import { assertProtectedBranchEffect } from "./protected-branch"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -62,12 +69,17 @@ export const EditTool = Tool.define(
     const afs = yield* FSUtil.Service
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
+    const provider = yield* Provider.Service
+    const sessions = yield* Session.Service
+    const config = yield* Config.Service
+    const vcs = yield* Vcs.Service
 
     return {
       description: DESCRIPTION,
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
+          if (ctx.abort.aborted) return yield* Effect.interrupt
           if (!params.filePath) {
             throw new Error("filePath is required")
           }
@@ -81,6 +93,8 @@ export const EditTool = Tool.define(
             ? params.filePath
             : path.join(instance.directory, params.filePath)
           yield* assertExternalDirectoryEffect(ctx, filePath)
+
+          yield* assertProtectedBranchEffect(ctx, vcs, config)
 
           let diff = ""
           let contentOld = ""
@@ -108,6 +122,7 @@ export const EditTool = Tool.define(
                     diff,
                   },
                 })
+                if (ctx.abort.aborted) return yield* Effect.interrupt
                 yield* afs.writeWithDirs(filePath, Bom.join(contentNew, desiredBom))
                 if (yield* format.file(filePath)) {
                   contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
@@ -142,6 +157,21 @@ export const EditTool = Tool.define(
                   normalizeLineEndings(contentNew),
                 ),
               )
+              if (EditSummaryFlag.isEnabled()) {
+                const summary = yield* EditSummary.summarizeFile({
+                  provider,
+                  model: ctx.extra?.model as Provider.Model | undefined,
+                  sessionID: ctx.sessionID,
+                  abort: ctx.abort,
+                  path: filePath,
+                  content: contentOld,
+                }).pipe(
+                  Effect.provideService(Session.Service, sessions),
+                  Effect.catch(() => Effect.succeed(undefined)),
+                )
+                if (ctx.abort.aborted) return yield* Effect.interrupt
+                yield* ctx.metadata({ metadata: summary ? { summary } : { summaryFailed: true } })
+              }
               yield* ctx.ask({
                 permission: "edit",
                 patterns: [path.relative(instance.worktree, filePath)],
@@ -152,6 +182,7 @@ export const EditTool = Tool.define(
                 },
               })
 
+              if (ctx.abort.aborted) return yield* Effect.interrupt
               yield* afs.writeWithDirs(filePath, Bom.join(contentNew, desiredBom))
               if (yield* format.file(filePath)) {
                 contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
