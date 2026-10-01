@@ -9,7 +9,7 @@ import { tmpdir } from "./fixture/fixture"
 import { createTuiResolvedConfig } from "./fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "./fixture/tui-sdk"
 
-test("session.cost opens the real dialog and live usage updates all session cost views", async () => {
+test("all cost views share one history load, update live, and stay isolated when switching sessions", async () => {
   await using tmp = await tmpdir()
   await Bun.write(`${tmp.path}/kv.json`, "{}")
   const setup = await createTestRenderer({ width: 150, height: 40, useThread: false })
@@ -25,6 +25,7 @@ test("session.cost opens the real dialog and live usage updates all session cost
     version: "0.0.0-test",
     time: { created: 1, updated: 2 },
   }
+  const second = { ...session, id: "second-cost-session", title: "Second cost session" }
   const provider: Provider = {
     id: "fixture",
     name: "Fixture provider",
@@ -79,11 +80,24 @@ test("session.cost opens the real dialog and live usage updates all session cost
     cost: 0.0123,
     tokens,
   }
+  const historyLoads: string[] = []
   const calls = createFetch((url) => {
-    if (url.pathname === "/session") return json([session])
-    if (url.pathname === `/session/${session.id}`) return json(session)
-    if (url.pathname === `/session/${session.id}/message`) return json([{ info, parts: [part] }])
-    if ([`/session/${session.id}/todo`, `/session/${session.id}/diff`].includes(url.pathname)) return json([])
+    if (url.pathname === "/session") return json([session, second])
+    const current = [session, second].find((item) => url.pathname.startsWith(`/session/${item.id}`))
+    if (current) {
+      if (url.pathname === `/session/${current.id}`) return json(current)
+      if (url.pathname === `/session/${current.id}/message`) {
+        if (!url.searchParams.has("limit")) historyLoads.push(current.id)
+        const cost = current.id === session.id ? 0.0123 : 0.09
+        return json([
+          {
+            info: { ...info, sessionID: current.id, cost },
+            parts: [{ ...part, sessionID: current.id, cost }],
+          },
+        ])
+      }
+      if ([`/session/${current.id}/todo`, `/session/${current.id}/diff`].includes(url.pathname)) return json([])
+    }
     if (url.pathname === "/config/providers") return json({ providers: [provider], default: { fixture: "model" } })
     if (url.pathname === "/provider")
       return json({ all: [provider], default: { fixture: "model" }, connected: ["fixture"] })
@@ -168,6 +182,7 @@ test("session.cost opens the real dialog and live usage updates all session cost
     const initial = await frameContaining("$0.0123 estimated")
     expect(initial).toContain("$0.0123 est.")
     expect(initial).toContain("Context")
+    expect(historyLoads).toEqual([session.id])
 
     api!.keymap.dispatchCommand("session.cost")
     const dialog = await frameContaining("Total (USD): $0.0123")
@@ -175,6 +190,7 @@ test("session.cost opens the real dialog and live usage updates all session cost
     expect(dialog).toContain("fixture/model")
     expect(dialog).toContain("Input: 100")
     expect(dialog).toContain("Output: 20")
+    expect(historyLoads).toEqual([session.id])
 
     events.emit({
       directory,
@@ -194,6 +210,29 @@ test("session.cost opens the real dialog and live usage updates all session cost
     const closed = await frameContaining("$0.0456 est.")
     expect(closed).toContain("$0.0456 estimated")
     expect(closed).not.toContain("Session cost")
+    api!.keymap.dispatchCommand("session.cost")
+    await frameContaining("Total (USD): $0.0456")
+    expect(historyLoads).toEqual([session.id])
+    setup.mockInput.pressEscape()
+    await frameContaining("$0.0456 est.")
+
+    api!.route.navigate("session", { sessionID: second.id })
+    const switched = await frameContaining("$0.09 estimated")
+    expect(switched).toContain("$0.09 est.")
+    expect(switched).not.toContain("$0.0456")
+    expect(historyLoads).toEqual([session.id, second.id])
+    events.emit({
+      directory,
+      payload: {
+        id: "old-session-update",
+        type: "message.part.updated",
+        properties: { sessionID: session.id, time: 4, part: { ...part, cost: 99 } },
+      },
+    })
+    api!.keymap.dispatchCommand("session.cost")
+    const isolated = await frameContaining("Total (USD): $0.09")
+    expect(isolated).not.toContain("$99")
+    expect(historyLoads).toEqual([session.id, second.id])
   } finally {
     if (!setup.renderer.isDestroyed) setup.renderer.destroy()
     await task

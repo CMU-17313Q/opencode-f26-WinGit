@@ -38,18 +38,20 @@ async function wait(condition: () => boolean) {
   }
 }
 
-async function mount(load: (id: string) => Promise<CostHistory>) {
+async function mount(load: (id: string, signal: AbortSignal) => Promise<CostHistory>) {
   const handlers = new Set<(event: Event) => void>()
   let state!: ReturnType<typeof createSessionCost>
-  let select!: (id: string) => void
+  let select!: (id: string | undefined) => void
   const requests: string[] = []
+  const signals: AbortSignal[] = []
   function Probe() {
-    const [session, setSession] = createSignal("session")
+    const [session, setSession] = createSignal<string | undefined>("session")
     select = setSession
     state = createSessionCost(session, {
-      load(id) {
+      load(id, signal) {
         requests.push(id)
-        return load(id)
+        signals.push(signal)
+        return load(id, signal)
       },
       subscribe(handler) {
         handlers.add(handler)
@@ -68,6 +70,7 @@ async function mount(load: (id: string) => Promise<CostHistory>) {
     state,
     select,
     requests,
+    signals,
     handlers,
     emit: (event: Event) => handlers.forEach((handler) => handler(event)),
   }
@@ -138,6 +141,8 @@ test("switching sessions cancels old ownership and ignores a late history respon
   try {
     view.select("second")
     await wait(() => view.state.summary()?.total === 2)
+    expect(view.signals[0].aborted).toBeTrue()
+    expect(view.signals[1].aborted).toBeFalse()
     resolve(history("session", 9))
     await Bun.sleep(5)
     expect(view.state.summary()?.total).toBe(2)
@@ -147,4 +152,29 @@ test("switching sessions cancels old ownership and ignores a late history respon
     view.app.renderer.destroy()
   }
   expect(view.handlers.size).toBe(0)
+  expect(view.signals[1].aborted).toBeTrue()
+})
+
+test("leaving a session releases its history request and subscription without keeping its total", async () => {
+  let resolve!: (value: CostHistory) => void
+  const view = await mount(
+    () =>
+      new Promise<CostHistory>((done) => {
+        resolve = done
+      }),
+  )
+  try {
+    view.select(undefined)
+    await wait(() => view.handlers.size === 0)
+    expect(view.signals[0].aborted).toBeTrue()
+    expect(view.state.loading()).toBeFalse()
+    expect(view.state.error()).toBeFalse()
+    expect(view.state.sessionID()).toBeUndefined()
+    resolve(history("session", 9))
+    await Bun.sleep(5)
+    expect(view.state.summary()).toBeUndefined()
+    expect(view.requests).toEqual(["session"])
+  } finally {
+    view.app.renderer.destroy()
+  }
 })
