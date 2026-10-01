@@ -704,6 +704,54 @@ describe("tool.edit", () => {
 
   describe("protected branch safeguard", () => {
     it.instance(
+      "rejecting a protected branch leaves the file unchanged without requesting a summary",
+      () =>
+        Effect.gen(function* () {
+          const before = EditSummaryFlag.isEnabled()
+          EditSummaryFlag.set(true)
+          yield* Effect.addFinalizer(() => Effect.sync(() => EditSummaryFlag.set(before)))
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M main`.cwd(test.directory).quiet())
+          const sessions = yield* Session.Service
+          const chat = yield* sessions.create({ title: "Pinned" })
+          const filepath = path.join(test.directory, "protected-summary.txt")
+          yield* put(filepath, "old content")
+          const base = yield* Provider.Service
+          let calls = 0
+          const requests: string[] = []
+          const exit = yield* run(
+            { filePath: filepath, oldString: "old content", newString: "new content" },
+            {
+              ...ctx,
+              sessionID: chat.id,
+              extra: { model: provider.model },
+              ask: (request) =>
+                Effect.gen(function* () {
+                  requests.push(request.permission)
+                  if (request.permission === "protected_branch") yield* Effect.die(new Error("branch rejected"))
+                }),
+            },
+          ).pipe(
+            Effect.provideService(Provider.Service, {
+              ...base,
+              getLanguage: () => {
+                calls++
+                return Effect.die(new Error("unexpected summary provider request"))
+              },
+            }),
+            Effect.exit,
+          )
+          expect(Exit.isFailure(exit)).toBe(true)
+          if (Exit.isFailure(exit)) expect(String(Cause.squash(exit.cause))).toContain("branch rejected")
+          expect(requests).toEqual(["protected_branch"])
+          expect(yield* load(filepath)).toBe("old content")
+          expect(calls).toBe(0)
+          expect(yield* sessions.auxiliaryUsage(chat.id)).toEqual([])
+        }),
+      { git: true },
+    )
+
+    it.instance(
       "asks for confirmation before editing on main",
       () =>
         Effect.gen(function* () {

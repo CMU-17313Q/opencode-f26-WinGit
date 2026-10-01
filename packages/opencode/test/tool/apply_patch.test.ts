@@ -20,7 +20,16 @@ import { Vcs } from "@/project/vcs"
 
 const it = testEffect(
   LayerNode.compile(
-    LayerNode.group([LSP.node, FSUtil.node, Format.node, EventV2Bridge.node, Truncate.node, Agent.node, Config.node, Vcs.node]),
+    LayerNode.group([
+      LSP.node,
+      FSUtil.node,
+      Format.node,
+      EventV2Bridge.node,
+      Truncate.node,
+      Agent.node,
+      Config.node,
+      Vcs.node,
+    ]),
   ),
 )
 
@@ -53,10 +62,7 @@ type AskInput = {
   }
 }
 
-const execute = Effect.fn("ApplyPatchToolTest.execute")(function* (
-  params: { patchText: string },
-  ctx: Tool.Context,
-) {
+const execute = Effect.fn("ApplyPatchToolTest.execute")(function* (params: { patchText: string }, ctx: Tool.Context) {
   const info = yield* ApplyPatchTool
   const tool = yield* info.init()
   return yield* tool.execute(params, ctx)
@@ -95,6 +101,44 @@ const expectFailure = <A, E, R>(effect: Effect.Effect<A, E, R>, message?: string
 const expectReadFailure = (filepath: string) => expectFailure(readText(filepath))
 
 describe("tool.apply_patch freeform", () => {
+  it.instance(
+    "rejecting a protected branch leaves every file in a multi-file patch unchanged",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* Effect.promise(() => $`git checkout -B main`.cwd(test.directory).quiet())
+        const modifyPath = path.join(test.directory, "modify.txt")
+        const deletePath = path.join(test.directory, "delete.txt")
+        const newPath = path.join(test.directory, "nested", "new.txt")
+        yield* writeText(modifyPath, "line1\nline2\n")
+        yield* writeText(deletePath, "obsolete\n")
+        const requests: Parameters<Tool.Context["ask"]>[0][] = []
+        const ctx: Tool.Context = {
+          ...baseCtx,
+          ask: (request) =>
+            Effect.gen(function* () {
+              requests.push(request)
+              if (request.permission === "protected_branch") return yield* Effect.die(new Error("branch rejected"))
+            }),
+        }
+        yield* expectFailure(
+          execute(
+            {
+              patchText:
+                "*** Begin Patch\n*** Add File: nested/new.txt\n+created\n*** Delete File: delete.txt\n*** Update File: modify.txt\n@@\n-line2\n+changed\n*** End Patch",
+            },
+            ctx,
+          ),
+          "branch rejected",
+        )
+        expect(requests.map((request) => request.permission)).toEqual(["protected_branch"])
+        expect(yield* readText(modifyPath)).toBe("line1\nline2\n")
+        expect(yield* readText(deletePath)).toBe("obsolete\n")
+        yield* expectReadFailure(newPath)
+      }),
+    { git: true },
+  )
+
   it.live("requires patchText", () =>
     Effect.gen(function* () {
       const { ctx } = makeCtx()

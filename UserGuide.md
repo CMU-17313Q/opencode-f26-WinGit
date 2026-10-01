@@ -152,3 +152,41 @@ bun typecheck
 ```
 
 [Summary helper tests](packages/opencode/test/tool/edit-summary.test.ts) exercise model selection, real provider-stream abort signals, durable pending-before-execution records and usage after reload. [Edit tool tests](packages/opencode/test/tool/edit.test.ts) verify unchanged files on cancellation and successful editing after a summary timeout or provider failure. [CLI integration tests](packages/opencode/test/cli/run/run-summary.test.ts) run actual `task → edit` flows against a local provider fixture, verify summary-before-edit ordering and child warnings, and replay duplicate, nested and unrelated events. They also preserve JSON output behavior. These fixtures do not use a paid provider.
+
+## Context window meter
+
+Feature: [Issue #5](https://github.com/CMU-17313Q/opencode-f26-WinGit/issues/5), [PR #9](https://github.com/CMU-17313Q/opencode-f26-WinGit/pull/9).
+
+Start a TUI session with `bun dev .`. The status bar under the prompt shows used tokens, the selected model's context-window limit and a rounded percentage. It turns yellow when that displayed percentage reaches 80%. The latest assistant response with output usage supplies input, output, reasoning and cached tokens. Earlier responses are not summed because each request includes the conversation again. A response without output usage keeps the previous value; an empty session starts at zero.
+
+To check it, send a short prompt, switch to a model with a different context limit, then use `/compact`. The percentage should recalculate immediately on the model switch. Usage may fall after compaction. An unknown context limit cannot produce a meaningful percentage. This meter describes conversation context; the USD estimate separately includes recorded title and summary calls.
+
+From `packages/tui`, run `bun test test/util/context-usage.test.ts test/session-cost-app.test.tsx` and `bun typecheck`. The helper tests cover the latest response, missing usage, compaction, cached tokens, model limits and the warning threshold. The application test checks that the meter and session cost remain visible together.
+
+## Protected branch warning
+
+Feature: [Issue #7](https://github.com/CMU-17313Q/opencode-f26-WinGit/issues/7), [PR #12](https://github.com/CMU-17313Q/opencode-f26-WinGit/pull/12).
+
+The built-in `edit`, `write` and `apply_patch` tools ask permission before changing files on `main`, `master` or `develop`. In the TUI, the warning names the branch. Choose **Allow once** to continue the current operation or **Reject** to stop it. No always-allow option is offered for this per-operation check.
+
+To customize the list, add this field to `opencode.json`; it replaces the defaults:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "protected_branches": ["main", "production"]
+}
+```
+
+An empty list disables the check. Existing permission configuration can also allow or deny `protected_branch`. The feature uses the local Git branch and configured names, rather than GitHub's protection settings. It does not cover shell commands or other tools.
+
+In non-interactive `opencode run`, an ask request is rejected by default. `--auto`, `--yolo` and `--dangerously-skip-permissions` automatically approve it once, including a known child task's protected-branch request. For a manual check, use a disposable repository on `main`: reject an edit and confirm the file remains unchanged; then allow one edit and confirm it completes. Repeat on a feature branch and check that no branch warning appears. If using `--summary`, rejection should happen before a summary request is made.
+
+From `packages/opencode`, run:
+
+```sh
+bun test test/tool/edit.test.ts test/tool/write.test.ts test/tool/apply_patch.test.ts test/agent/agent.test.ts test/cli/run/run-protected-branch.test.ts
+bun typecheck
+```
+
+The tool tests cover protected/feature branch checks and rejection before file changes. The patch regression rejects one add/update/delete patch and verifies that all files remain unchanged. The actual CLI tests use a Git repository on `main` with delegated editing, checking auto approval and default rejection, both with and without summaries. The rejection tests also check that no summary provider request is made. These tests use disposable files and local provider fixtures.

@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import type * as Tool from "./tool"
+import type { Tool } from "./tool"
 import { Config } from "@/config/config"
 import { Vcs } from "@/project/vcs"
 

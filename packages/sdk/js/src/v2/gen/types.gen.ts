@@ -1948,6 +1948,7 @@ export type Config = {
     ignore?: Array<string>
   }
   snapshot?: boolean
+  protected_branches?: Array<string>
   plugin?: Array<
     | string
     | [

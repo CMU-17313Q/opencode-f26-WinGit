@@ -35,7 +35,7 @@ export const WriteTool = Tool.define(
     const events = yield* EventV2Bridge.Service
     const format = yield* Format.Service
     const config = yield* Config.Service
-    const vcs = yield* Vcs.Service  
+    const vcs = yield* Vcs.Service
 
     return {
       description: DESCRIPTION,

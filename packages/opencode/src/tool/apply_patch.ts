@@ -206,12 +206,12 @@ export const ApplyPatchTool = Tool.define(
         movePath: change.movePath,
       }))
 
-        // Check protected branch before applying any file changes
-        yield* assertProtectedBranchEffect(ctx, vcs, config)
+      // Check protected branch before applying any file changes
+      yield* assertProtectedBranchEffect(ctx, vcs, config)
 
-        // Check permissions if needed
-        const relativePaths = fileChanges.map((c) => path.relative(instance.worktree, c.filePath).replaceAll("\\", "/"))
-        yield* ctx.ask({
+      // Check permissions if needed
+      const relativePaths = fileChanges.map((c) => path.relative(instance.worktree, c.filePath).replaceAll("\\", "/"))
+      yield* ctx.ask({
         permission: "edit",
         patterns: relativePaths,
         always: ["*"],

@@ -722,7 +722,7 @@ export const RunCommand = effectCmd({
         // created, and replies issued from inside the loop must use that client.
         async function loop(client: OpencodeClient, events: Awaited<ReturnType<typeof sdk.event.subscribe>>) {
           const toggles = new Map<string, boolean>()
-          const summarySessions = new Set([sessionID])
+          const runSessions = new Set([sessionID])
           let error: string | undefined
 
           for await (const event of events.stream) {
@@ -743,12 +743,12 @@ export const RunCommand = effectCmd({
               const part = event.properties.part
               // Task metadata is published before the child starts. Follow only
               // this run's descendants, while keeping ordinary output root-only.
-              if (args.summary && summarySessions.has(part.sessionID) && part.type === "tool") {
+              if (runSessions.has(part.sessionID) && part.type === "tool") {
                 if (part.tool === "task" && (part.state.status === "running" || part.state.status === "completed")) {
                   const child = part.state.metadata?.sessionId
-                  if (typeof child === "string") summarySessions.add(child)
+                  if (typeof child === "string") runSessions.add(child)
                 }
-                if (part.tool === "edit" && part.state.status === "running") {
+                if (args.summary && part.tool === "edit" && part.state.status === "running") {
                   const input = part.state.input as { filePath?: string; path?: string }
                   const rawPath = input.filePath ?? input.path
                   const metadata = part.state.metadata as { summary?: string; summaryFailed?: boolean } | undefined
@@ -838,7 +838,13 @@ export const RunCommand = effectCmd({
 
             if (event.type === "permission.asked") {
               const permission = event.properties
-              if (permission.sessionID !== sessionID) continue
+              // Editing subagents also request branch confirmation. Apply the
+              // CLI policy to those requests without widening other permissions.
+              if (
+                permission.sessionID !== sessionID &&
+                !(permission.permission === "protected_branch" && runSessions.has(permission.sessionID))
+              )
+                continue
 
               if (auto) {
                 await client.permission.reply({

@@ -204,6 +204,11 @@ describe("opencode run --summary", () => {
               },
             },
           })
+          const permission = (sessionID: string, id: string, name = "protected_branch"): Event => ({
+            id: `event-${id}`,
+            type: "permission.asked",
+            properties: { id, sessionID, permission: name, patterns: ["main"], always: [], metadata: {} },
+          })
           const events: Event[] = [
             tool(
               "unrelated",
@@ -212,6 +217,7 @@ describe("opencode run --summary", () => {
               { sessionId: "unrelated-child" },
               { description: "Unrelated task", subagent_type: "general" },
             ),
+            permission("unrelated-child", "unrelated-protected"),
             tool(
               "unrelated-child",
               "private-edit",
@@ -233,6 +239,9 @@ describe("opencode run --summary", () => {
               { sessionId: "grandchild" },
               { description: "Nested task", subagent_type: "general" },
             ),
+            permission("child", "child-protected"),
+            permission("grandchild", "grandchild-protected"),
+            permission("child", "child-bash", "bash"),
             child,
             child,
             tool(
@@ -296,6 +305,7 @@ describe("opencode run --summary", () => {
             },
           ]
           const consumed = Promise.withResolvers<void>()
+          const replies: { id: string; reply: string }[] = []
           // Replay server events through the real CLI transport, including events
           // a live single-run fixture cannot naturally produce (duplicates and strangers).
           const server = yield* Effect.acquireRelease(
@@ -314,8 +324,10 @@ describe("opencode run --summary", () => {
                       headers: { "content-type": "text/event-stream" },
                     })
                   }
-                  if (url.pathname === "/permission/replay-permission/reply") {
-                    consumed.resolve()
+                  if (url.pathname.startsWith("/permission/") && url.pathname.endsWith("/reply")) {
+                    const id = url.pathname.split("/")[2]
+                    replies.push({ id, reply: (await request.json()).reply })
+                    if (id === "replay-permission") consumed.resolve()
                     return Response.json(true)
                   }
                   if (url.pathname === "/session/root/message" && request.method === "POST") {
@@ -347,6 +359,11 @@ describe("opencode run --summary", () => {
             ],
           })
           opencode.expectExit(result, 0)
+          expect(replies).toEqual([
+            { id: "child-protected", reply: "once" },
+            { id: "grandchild-protected", reply: "once" },
+            { id: "replay-permission", reply: "once" },
+          ])
           for (const marker of [
             "FIRST_LEVEL_SUMMARY",
             "NESTED_REPLAY_SUMMARY",
