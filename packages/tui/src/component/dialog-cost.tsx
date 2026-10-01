@@ -73,11 +73,13 @@ export function CostView(props: {
                     </box>
                   </Show>
                   <text fg={theme.textMuted} wrapMode="word">
-                    Estimates include compacted turns. Input includes cached tokens; output includes reasoning tokens.
+                    Estimates include compacted turns and recorded title generation. Input includes cached tokens;
+                    output includes reasoning tokens.
                   </text>
                   <Show when={summary().models.some((model) => model.cost === undefined)}>
                     <text fg={theme.warning} wrapMode="word">
-                      n/a means pricing is unavailable or zero-rated. Total is n/a when any model is unpriced.
+                      n/a means pricing is unavailable or zero-rated, or usage is pending or incomplete. Total is n/a
+                      when any model is unavailable.
                     </text>
                   </Show>
                 </>

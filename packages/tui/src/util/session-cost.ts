@@ -1,4 +1,12 @@
-import type { AssistantMessage, Event, Message, Part, Provider, StepFinishPart } from "@opencode-ai/sdk/v2"
+import type {
+  AssistantMessage,
+  AuxiliaryUsage,
+  Event,
+  Message,
+  Part,
+  Provider,
+  StepFinishPart,
+} from "@opencode-ai/sdk/v2"
 
 export type SessionCostSummary = {
   models: {
@@ -18,6 +26,7 @@ export type CostProvider = {
 }
 
 export type CostHistory = { info: Message; parts: Part[] }[]
+export type CostSnapshot = { history: CostHistory; auxiliary: AuxiliaryUsage[] }
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -45,6 +54,7 @@ function priced(providerID: string, modelID: string, providers: readonly CostPro
 /** Retain accounting records independently of the TUI's 100-message display window. */
 export function createSessionCostLedger(sessionID: string) {
   const messages = new Map<string, { info?: AssistantMessage; steps: Map<string, StepFinishPart>; hadSteps: boolean }>()
+  const auxiliary = new Map<string, AuxiliaryUsage>()
 
   function entry(messageID: string) {
     const existing = messages.get(messageID)
@@ -74,6 +84,8 @@ export function createSessionCostLedger(sessionID: string) {
 
   function apply(event: Event) {
     switch (event.type) {
+      case "session.auxiliary_usage.updated":
+        return usage(event.properties.usage)
       case "message.updated":
         return message(event.properties.info)
       case "message.part.updated":
@@ -91,42 +103,58 @@ export function createSessionCostLedger(sessionID: string) {
     }
   }
 
-  function hydrate(history: CostHistory) {
+  function usage(value: AuxiliaryUsage) {
+    if (value.sessionID !== sessionID) return false
+    const existing = auxiliary.get(value.id)
+    if (existing && existing.time.updated > value.time.updated) return false
+    if (existing && existing.status !== "pending" && value.status === "pending") return false
+    auxiliary.set(value.id, value)
+    return true
+  }
+
+  function hydrate(history: CostHistory, records: AuxiliaryUsage[] = []) {
     messages.clear()
+    auxiliary.clear()
     for (const item of history) {
       message(item.info)
       for (const value of item.parts) part(value)
     }
+    for (const record of records) usage(record)
   }
 
   function summarize(providers: readonly CostProvider[]): SessionCostSummary {
     const models = new Map<string, SessionCostSummary["models"][number]>()
     let knownTotal = 0
+    function add(
+      providerID: string,
+      modelID: string,
+      record: { cost?: number; tokens?: StepFinishPart["tokens"]; status?: AuxiliaryUsage["status"] },
+    ) {
+      const key = JSON.stringify([providerID, modelID])
+      const model = models.get(key) ?? { providerID, modelID, input: 0, output: 0, cost: 0 }
+      if (record.tokens) {
+        model.input += count(record.tokens.input) + count(record.tokens.cache.read) + count(record.tokens.cache.write)
+        model.output += count(record.tokens.output) + count(record.tokens.reasoning)
+      }
+      // Keep recorded charges even if catalog prices change or disappear. Missing
+      // auxiliary usage must never make a partial amount look like a complete bill.
+      const cost = record.cost
+      const known =
+        cost !== undefined && Number.isFinite(cost) && cost >= 0 && (cost > 0 || priced(providerID, modelID, providers))
+      if (known) knownTotal += cost
+      const complete = record.tokens !== undefined && (record.status === undefined || record.status === "complete")
+      model.cost = model.cost !== undefined && known && complete ? model.cost + cost : undefined
+      models.set(key, model)
+    }
     for (const item of messages.values()) {
       if (!item.info) continue
       const info = item.info
-      const key = JSON.stringify([info.providerID, info.modelID])
-      const existing = models.get(key)
-      const model = existing ?? { providerID: info.providerID, modelID: info.modelID, input: 0, output: 0, cost: 0 }
       // Old persisted messages may have no step records. Once step records exist,
       // their removal must not resurrect the assistant's stale aggregate.
       const records = item.hadSteps ? [...item.steps.values()] : [info]
-      if (records.length === 0) continue
-      for (const record of records) {
-        model.input += count(record.tokens.input) + count(record.tokens.cache.read) + count(record.tokens.cache.write)
-        model.output += count(record.tokens.output) + count(record.tokens.reasoning)
-        // The legacy provider API folds absent prices into zero. A paid recorded
-        // charge remains valid even if a model disappears from the catalog; zero
-        // with all-zero/missing rates is conservatively n/a (including free/local).
-        const available =
-          Number.isFinite(record.cost) &&
-          record.cost >= 0 &&
-          (record.cost > 0 || priced(info.providerID, info.modelID, providers))
-        if (available) knownTotal += record.cost
-        model.cost = model.cost !== undefined && available ? model.cost + record.cost : undefined
-      }
-      models.set(key, model)
+      for (const record of records) add(info.providerID, info.modelID, record)
     }
+    for (const record of auxiliary.values()) add(record.providerID, record.modelID, record)
     const rows = [...models.values()].sort(
       (a, b) => a.providerID.localeCompare(b.providerID) || a.modelID.localeCompare(b.modelID),
     )

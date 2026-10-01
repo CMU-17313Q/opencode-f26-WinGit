@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { AssistantMessage, Event, StepFinishPart } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, AuxiliaryUsage, Event, StepFinishPart } from "@opencode-ai/sdk/v2"
 import { createSessionCostLedger, formatCost, type CostProvider } from "../../src/util/session-cost"
 
 const providers: CostProvider[] = [
@@ -40,7 +40,98 @@ function update(part: StepFinishPart): Event {
   return { id: "event", type: "message.part.updated", properties: { sessionID: "session", time: 2, part } }
 }
 
+function title(overrides: Partial<AuxiliaryUsage> = {}): AuxiliaryUsage {
+  return {
+    id: "aux_title:0",
+    requestID: "aux_title",
+    sessionID: "session",
+    step: 0,
+    purpose: "title",
+    providerID: "paid",
+    modelID: "small",
+    status: "complete",
+    cost: 0.0002,
+    tokens: { input: 40, output: 5, reasoning: 2, cache: { read: 10, write: 0 } },
+    time: { created: 1, updated: 2 },
+    ...overrides,
+  }
+}
+
 describe("session cost accounting", () => {
+  test("includes title usage under its actual model without needing a visible message", () => {
+    const ledger = createSessionCostLedger("session")
+    ledger.hydrate([{ info: assistant(), parts: [step()] }], [title()])
+    const summary = ledger.summarize(providers)
+    expect(summary.models).toEqual([
+      { providerID: "paid", modelID: "model", input: 125, output: 25, cost: 0.001 },
+      { providerID: "paid", modelID: "small", input: 50, output: 7, cost: 0.0002 },
+    ])
+    expect(summary.total).toBeCloseTo(0.0012)
+  })
+
+  test("replaces repeated title events, keeps separate steps, and ignores other sessions", () => {
+    const ledger = createSessionCostLedger("session")
+    ledger.hydrate([], [title({ status: "pending", cost: undefined, tokens: undefined })])
+    expect(ledger.summarize(providers).total).toBeUndefined()
+    const event: Event = {
+      id: "title-event",
+      type: "session.auxiliary_usage.updated",
+      properties: { sessionID: "session", usage: title() },
+    }
+    ledger.apply(event)
+    ledger.apply(event)
+    expect(ledger.summarize(providers).total).toBe(0.0002)
+    ledger.apply({ ...event, properties: { sessionID: "session", usage: title({ id: "aux_title:1", step: 1 }) } })
+    expect(ledger.summarize(providers).total).toBe(0.0004)
+    expect(
+      ledger.apply({ ...event, properties: { sessionID: "other", usage: title({ sessionID: "other" }) } }),
+    ).toBeFalse()
+    expect(ledger.summarize(providers).total).toBe(0.0004)
+  })
+
+  test("incomplete title usage makes the total unavailable while retaining known charges", () => {
+    const ledger = createSessionCostLedger("session")
+    ledger.hydrate(
+      [{ info: assistant(), parts: [step()] }],
+      [title({ status: "unavailable", cost: undefined, tokens: undefined })],
+    )
+    expect(ledger.summarize(providers)).toMatchObject({ total: undefined, knownTotal: 0.001 })
+    ledger.hydrate([], [title({ status: "unavailable" })])
+    expect(ledger.summarize(providers)).toMatchObject({ total: undefined, knownTotal: 0.0002 })
+  })
+
+  test("a pending event cannot overwrite a newer completed title snapshot", () => {
+    const ledger = createSessionCostLedger("session")
+    ledger.hydrate([], [title()])
+    ledger.apply({
+      id: "old-pending",
+      type: "session.auxiliary_usage.updated",
+      properties: {
+        sessionID: "session",
+        usage: title({ status: "pending", cost: undefined, tokens: undefined }),
+      },
+    })
+    ledger.apply({
+      id: "old-unavailable",
+      type: "session.auxiliary_usage.updated",
+      properties: {
+        sessionID: "session",
+        usage: title({ status: "unavailable", cost: undefined, tokens: undefined, time: { created: 1, updated: 1 } }),
+      },
+    })
+    expect(ledger.summarize(providers).total).toBe(0.0002)
+  })
+
+  test("title charges survive conversation removal and rehydrate only for their own session", () => {
+    const ledger = createSessionCostLedger("session")
+    ledger.hydrate([{ info: assistant(), parts: [step()] }], [title()])
+    ledger.apply({ id: "delete", type: "message.removed", properties: { sessionID: "session", messageID: "message" } })
+    expect(ledger.summarize(providers).total).toBe(0.0002)
+    const fork = createSessionCostLedger("fork")
+    fork.hydrate([], [title()])
+    expect(fork.summarize(providers).total).toBe(0)
+  })
+
   test("counts each billable step including cache and reasoning, not only the last message tokens", () => {
     const ledger = createSessionCostLedger("session")
     ledger.hydrate([{ info: assistant(), parts: [step("a"), step("b", "message", 0.002)] }])

@@ -1,6 +1,6 @@
 import type { Event } from "@opencode-ai/sdk/v2"
 import { createEffect, createMemo, createSignal, on, onCleanup, type Accessor } from "solid-js"
-import { createSessionCostLedger, type CostHistory, type CostProvider } from "../util/session-cost"
+import { createSessionCostLedger, type CostSnapshot, type CostProvider } from "../util/session-cost"
 import { useEvent } from "./event"
 import { createSimpleContext } from "./helper"
 import { useRoute } from "./route"
@@ -10,7 +10,7 @@ import { useSync } from "./sync"
 export function createSessionCost(
   sessionID: Accessor<string | undefined>,
   source: {
-    load: (sessionID: string, signal: AbortSignal) => Promise<CostHistory>
+    load: (sessionID: string, signal: AbortSignal) => Promise<CostSnapshot>
     subscribe: (handler: (event: Event) => void) => () => void
     providers: Accessor<readonly CostProvider[]>
   },
@@ -51,9 +51,9 @@ export function createSessionCost(
       void Promise.resolve()
         .then(() => source.load(id, abort.signal))
         .then(
-          (history) => {
+          (snapshot) => {
             if (!state.active) return
-            current.hydrate(history)
+            current.hydrate(snapshot.history, snapshot.auxiliary)
             for (const event of state.pending) current.apply(event)
             state.pending.length = 0
             state.hydrated = true
@@ -90,9 +90,12 @@ const SessionCostContext = createSimpleContext({
     const route = useRoute()
     return createSessionCost(() => (route.data.type === "session" ? route.data.sessionID : undefined), {
       async load(id, signal) {
-        const response = await sdk.client.session.messages({ sessionID: id }, { throwOnError: true, signal })
-        if (!response.data) throw new Error("Session usage unavailable")
-        return response.data
+        const [messages, auxiliary] = await Promise.all([
+          sdk.client.session.messages({ sessionID: id }, { throwOnError: true, signal }),
+          sdk.client.session.auxiliaryUsage({ sessionID: id }, { throwOnError: true, signal }),
+        ])
+        if (!messages.data || !auxiliary.data) throw new Error("Session usage unavailable")
+        return { history: messages.data, auxiliary: auxiliary.data }
       },
       subscribe: events.subscribe,
       providers: () => sync.data.provider,
