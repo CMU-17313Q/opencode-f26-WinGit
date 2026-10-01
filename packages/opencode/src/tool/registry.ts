@@ -24,6 +24,7 @@ import { Schema } from "effect"
 import z from "zod"
 import { Plugin } from "../plugin"
 import { Provider } from "@/provider/provider"
+import { Vcs } from "@/project/vcs"
 
 import { WebSearchTool } from "./websearch"
 import { LspTool } from "./lsp"
@@ -424,6 +425,7 @@ export const node = LayerNode.make({
   layer,
   deps: [
     Config.node,
+    Vcs.node,
     Plugin.node,
     Question.node,
     Todo.node,

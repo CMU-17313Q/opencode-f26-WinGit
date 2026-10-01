@@ -22,6 +22,9 @@ import { Provider } from "@/provider/provider"
 import { EditSummary } from "./edit-summary"
 import { EditSummaryFlag } from "./edit-summary-flag"
 import { Session } from "@/session/session"
+import { Config } from "@/config/config"
+import { Vcs } from "@/project/vcs"
+import { assertProtectedBranchEffect } from "./protected-branch"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -68,6 +71,8 @@ export const EditTool = Tool.define(
     const events = yield* EventV2Bridge.Service
     const provider = yield* Provider.Service
     const sessions = yield* Session.Service
+    const config = yield* Config.Service
+    const vcs = yield* Vcs.Service
 
     return {
       description: DESCRIPTION,
@@ -88,6 +93,8 @@ export const EditTool = Tool.define(
             ? params.filePath
             : path.join(instance.directory, params.filePath)
           yield* assertExternalDirectoryEffect(ctx, filePath)
+
+          yield* assertProtectedBranchEffect(ctx, vcs, config)
 
           let diff = ""
           let contentOld = ""

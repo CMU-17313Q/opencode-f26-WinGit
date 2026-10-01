@@ -13,10 +13,14 @@ import { Truncate } from "@/tool/truncate"
 import { TestInstance } from "../fixture/fixture"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { testEffect } from "../lib/effect"
+import { $ } from "bun"
+import type { Tool } from "@/tool/tool"
+import { Config } from "@/config/config"
+import { Vcs } from "@/project/vcs"
 
 const it = testEffect(
   LayerNode.compile(
-    LayerNode.group([LSP.node, FSUtil.node, Format.node, EventV2Bridge.node, Truncate.node, Agent.node]),
+    LayerNode.group([LSP.node, FSUtil.node, Format.node, EventV2Bridge.node, Truncate.node, Agent.node, Config.node, Vcs.node]),
   ),
 )
 
@@ -49,11 +53,10 @@ type AskInput = {
   }
 }
 
-type ToolCtx = typeof baseCtx & {
-  ask: (input: AskInput) => Effect.Effect<void>
-}
-
-const execute = Effect.fn("ApplyPatchToolTest.execute")(function* (params: { patchText: string }, ctx: ToolCtx) {
+const execute = Effect.fn("ApplyPatchToolTest.execute")(function* (
+  params: { patchText: string },
+  ctx: Tool.Context,
+) {
   const info = yield* ApplyPatchTool
   const tool = yield* info.init()
   return yield* tool.execute(params, ctx)
@@ -61,15 +64,21 @@ const execute = Effect.fn("ApplyPatchToolTest.execute")(function* (params: { pat
 
 const makeCtx = () => {
   const calls: AskInput[] = []
-  const ctx: ToolCtx = {
+  const permissionCalls: Parameters<Tool.Context["ask"]>[0][] = []
+
+  const ctx: Tool.Context = {
     ...baseCtx,
     ask: (input) =>
       Effect.sync(() => {
-        calls.push(input)
+        permissionCalls.push(input)
+
+        if (input.permission === "edit") {
+          calls.push(input as AskInput)
+        }
       }),
   }
 
-  return { ctx, calls }
+  return { ctx, calls, permissionCalls }
 }
 
 const readText = (filepath: string) => Effect.promise(() => fs.readFile(filepath, "utf-8"))
@@ -525,5 +534,34 @@ EOF`
       // Result has ASCII quotes because that's what the patch specifies
       expect(yield* readText(target)).toBe(`He said "hi"\nsome${emDash}dash\nend\n`)
     }),
+  )
+
+  it.instance(
+    "asks for confirmation before applying a patch on main",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* Effect.promise(() => $`git branch -M main`.cwd(test.directory).quiet())
+
+        const target = path.join(test.directory, "protected.txt")
+        yield* writeText(target, "old content\n")
+
+        const { ctx, permissionCalls } = makeCtx()
+
+        const patchText =
+          "*** Begin Patch\n*** Update File: protected.txt\n@@\n-old content\n+new content\n*** End Patch"
+
+        yield* execute({ patchText }, ctx)
+
+        const request = permissionCalls.find((item) => item.permission === "protected_branch")
+
+        expect(request).toBeDefined()
+        expect(request?.patterns).toEqual(["main"])
+        expect(request?.always).toEqual([])
+        expect(request?.metadata.branch).toBe("main")
+
+        expect(yield* readText(target)).toBe("new content\n")
+      }),
+    { git: true },
   )
 })

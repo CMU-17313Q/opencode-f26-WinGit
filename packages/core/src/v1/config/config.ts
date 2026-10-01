@@ -53,6 +53,10 @@ export const Info = Schema.Struct({
     description:
       "Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.",
   }),
+  protected_branches: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
+    description:
+      "Branch names that require confirmation before file modifications (default: main, master, develop)",
+  }),
   plugin: Schema.optional(Schema.mutable(Schema.Array(ConfigPluginV1.Spec))),
   share: Schema.optional(Schema.Literals(["manual", "auto", "disabled"])).annotate({
     description:
