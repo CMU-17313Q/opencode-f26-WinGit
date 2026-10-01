@@ -254,6 +254,12 @@ export const RunCommand = effectCmd({
         hidden: true,
         default: false,
       })
+      .option("summary", {
+        type: "boolean",
+        default: false,
+        describe:
+          "print a short AI-generated summary of a file before an edit tool applies changes to it (non-attach mode only)",
+      })
       .option("demo", {
         type: "boolean",
         default: false,
@@ -273,6 +279,10 @@ export const RunCommand = effectCmd({
       const interactive = args.mini
       const auto = args.auto || args.yolo || args["dangerously-skip-permissions"]
       const thinking = interactive ? (args.thinking ?? true) : (args.thinking ?? false)
+      if (args.summary && !args.attach) {
+        const { EditSummaryFlag } = await import("@/tool/edit-summary-flag")
+        EditSummaryFlag.set(true)
+      }
       const die = (message: string): never => {
         UI.error(message)
         process.exit(1)
@@ -667,6 +677,22 @@ export const RunCommand = effectCmd({
         return localAgent()
       }
 
+      const editSummaryPrinted = new Set<string>()
+      function printEditSummary(callID: string, rawPath: string, summary: string | undefined) {
+        if (editSummaryPrinted.has(callID)) return
+        editSummaryPrinted.add(callID)
+
+        if (!summary) {
+          UI.println(
+            UI.Style.TEXT_WARNING_BOLD + "!",
+            UI.Style.TEXT_NORMAL + ` could not generate a summary for ${rawPath}`,
+          )
+          return
+        }
+
+        block({ icon: "ℹ", title: `Summary: ${rawPath}` }, summary)
+      }
+
       async function execute(sdk: OpencodeClient) {
         const sess = await session(sdk)
         if (!sess?.id) {
@@ -737,6 +763,15 @@ export const RunCommand = effectCmd({
                 toggles.set(part.id, true)
               }
 
+              if (part.type === "tool" && part.tool === "edit" && part.state.status === "running" && args.summary) {
+                const input = part.state.input as { filePath?: string; path?: string }
+                const rawPath = input.filePath ?? input.path
+                const metadata = part.state.metadata as { summary?: string; summaryFailed?: boolean } | undefined
+                if (rawPath && (metadata?.summary || metadata?.summaryFailed)) {
+                  printEditSummary(part.id, rawPath, metadata.summary)
+                }
+              }
+
               if (part.type === "step-start") {
                 if (emit("step_start", { part })) continue
               }
@@ -796,6 +831,7 @@ export const RunCommand = effectCmd({
             if (event.type === "permission.asked") {
               const permission = event.properties
               if (permission.sessionID !== sessionID) continue
+
 
               if (auto) {
                 await client.permission.reply({
@@ -997,6 +1033,7 @@ export async function runMini(input: MiniCommandInput) {
     port: undefined,
     variant: undefined,
     thinking: undefined,
+    summary: false,
     mini: true,
     interactive: false,
     replay: input.replay ?? true,
