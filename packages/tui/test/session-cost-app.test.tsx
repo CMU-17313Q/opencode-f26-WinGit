@@ -1,5 +1,5 @@
 import { expect, mock, test } from "bun:test"
-import type { AssistantMessage, Provider, StepFinishPart } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, AuxiliaryUsage, Provider, StepFinishPart } from "@opencode-ai/sdk/v2"
 import type { TuiPluginApi, TuiSlotPlugin } from "@opencode-ai/plugin/tui"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Effect } from "effect"
@@ -81,11 +81,29 @@ test("all cost views share one history load, update live, and stay isolated when
     tokens,
   }
   const historyLoads: string[] = []
+  const auxiliaryLoads: string[] = []
+  const title: AuxiliaryUsage = {
+    id: "aux_fixture:0",
+    requestID: "aux_fixture",
+    step: 0,
+    sessionID: session.id,
+    purpose: "title",
+    providerID: provider.id,
+    modelID: "title-model",
+    status: "complete",
+    cost: 0.0002,
+    tokens: { ...tokens, input: 10, output: 5 },
+    time: { created: 1, updated: 2 },
+  }
   const calls = createFetch((url) => {
     if (url.pathname === "/session") return json([session, second])
     const current = [session, second].find((item) => url.pathname.startsWith(`/session/${item.id}`))
     if (current) {
       if (url.pathname === `/session/${current.id}`) return json(current)
+      if (url.pathname === `/session/${current.id}/auxiliary_usage`) {
+        auxiliaryLoads.push(current.id)
+        return json(current.id === session.id ? [title] : [])
+      }
       if (url.pathname === `/session/${current.id}/message`) {
         if (!url.searchParams.has("limit")) historyLoads.push(current.id)
         const cost = current.id === session.id ? 0.0123 : 0.09
@@ -179,16 +197,19 @@ test("all cost views share one history load, update live, and stay isolated when
         ),
       ),
     )
-    const initial = await frameContaining("$0.0123 estimated")
-    expect(initial).toContain("$0.0123 est.")
-    expect(initial).toContain("120 / 10.0K (1%) · $0.0123 est.")
+    const initial = await frameContaining("$0.0125 estimated")
+    expect(initial).toContain("$0.0125 est.")
+    expect(initial).toContain("120 / 10.0K (1%) · $0.0125 est.")
     expect(initial).toContain("Context")
+    expect(initial).toContain("120 tokens")
     expect(historyLoads).toEqual([session.id])
+    expect(auxiliaryLoads).toEqual([session.id])
 
     api!.keymap.dispatchCommand("session.cost")
-    const dialog = await frameContaining("Total (USD): $0.0123")
+    const dialog = await frameContaining("Total (USD): $0.0125")
     expect(dialog).toContain("Session cost")
     expect(dialog).toContain("fixture/model")
+    expect(dialog).toContain("fixture/title-model")
     expect(dialog).toContain("Input: 100")
     expect(dialog).toContain("Output: 20")
     expect(historyLoads).toEqual([session.id])
@@ -205,25 +226,40 @@ test("all cost views share one history load, update live, and stay isolated when
         },
       },
     })
-    const updated = await frameContaining("Total (USD): $0.0456")
+    const updated = await frameContaining("Total (USD): $0.0458")
     expect(updated).toContain("Input: 200")
+    const titleEvent = {
+      directory,
+      payload: {
+        id: "title-fixture-update",
+        type: "session.auxiliary_usage.updated" as const,
+        properties: { sessionID: session.id, usage: { ...title, cost: 0.0005 } },
+      },
+    }
+    events.emit(titleEvent)
+    events.emit(titleEvent)
+    await frameContaining("Total (USD): $0.0461")
     setup.mockInput.pressEscape()
-    const closed = await frameContaining("$0.0456 est.")
-    expect(closed).toContain("$0.0456 estimated")
-    expect(closed).toContain("120 / 10.0K (1%) · $0.0456 est.")
+    const closed = await frameContaining("$0.0461 est.")
+    expect(closed).toContain("$0.0461 estimated")
+    expect(closed).toContain("120 / 10.0K (1%) · $0.0461 est.")
+    expect(closed).toContain("120 tokens")
     expect(closed).not.toContain("Session cost")
     api!.keymap.dispatchCommand("session.cost")
-    await frameContaining("Total (USD): $0.0456")
+    await frameContaining("Total (USD): $0.0461")
     expect(historyLoads).toEqual([session.id])
+    expect(auxiliaryLoads).toEqual([session.id])
     setup.mockInput.pressEscape()
-    await frameContaining("$0.0456 est.")
+    await frameContaining("$0.0461 est.")
 
     api!.route.navigate("session", { sessionID: second.id })
     const switched = await frameContaining("$0.09 estimated")
     expect(switched).toContain("$0.09 est.")
     expect(switched).toContain("120 / 10.0K (1%) · $0.09 est.")
-    expect(switched).not.toContain("$0.0456")
+    expect(switched).not.toContain("$0.0461")
     expect(historyLoads).toEqual([session.id, second.id])
+    expect(auxiliaryLoads).toEqual([session.id, second.id])
+    events.emit(titleEvent)
     events.emit({
       directory,
       payload: {

@@ -1,12 +1,12 @@
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/solid"
-import type { AssistantMessage, Event, StepFinishPart } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, AuxiliaryUsage, Event, StepFinishPart } from "@opencode-ai/sdk/v2"
 import { createSignal } from "solid-js"
 import { createSessionCost } from "../../src/context/session-cost"
-import type { CostHistory } from "../../src/util/session-cost"
+import type { CostSnapshot } from "../../src/util/session-cost"
 
-function history(sessionID = "session", cost = 1): CostHistory {
+function history(sessionID = "session", cost = 1): CostSnapshot {
   const tokens = { input: 100, output: 20, reasoning: 0, cache: { read: 0, write: 0 } }
   const info: AssistantMessage = {
     id: "message",
@@ -22,12 +22,15 @@ function history(sessionID = "session", cost = 1): CostHistory {
     cost,
     tokens,
   }
-  return [
-    {
-      info,
-      parts: [{ id: "part", messageID: "message", sessionID, type: "step-finish", reason: "stop", cost, tokens }],
-    },
-  ]
+  return {
+    auxiliary: [],
+    history: [
+      {
+        info,
+        parts: [{ id: "part", messageID: "message", sessionID, type: "step-finish", reason: "stop", cost, tokens }],
+      },
+    ],
+  }
 }
 
 async function wait(condition: () => boolean) {
@@ -38,7 +41,7 @@ async function wait(condition: () => boolean) {
   }
 }
 
-async function mount(load: (id: string, signal: AbortSignal) => Promise<CostHistory>) {
+async function mount(load: (id: string, signal: AbortSignal) => Promise<CostSnapshot>) {
   const handlers = new Set<(event: Event) => void>()
   let state!: ReturnType<typeof createSessionCost>
   let select!: (id: string | undefined) => void
@@ -77,14 +80,14 @@ async function mount(load: (id: string, signal: AbortSignal) => Promise<CostHist
 }
 
 test("replays live updates over a stale hydration response without double counting", async () => {
-  let resolve!: (value: CostHistory) => void
-  const pending = new Promise<CostHistory>((done) => {
+  let resolve!: (value: CostSnapshot) => void
+  const pending = new Promise<CostSnapshot>((done) => {
     resolve = done
   })
   const view = await mount(() => pending)
   try {
     expect(view.state.loading()).toBeTrue()
-    const part = history("session", 3)[0].parts[0] as StepFinishPart
+    const part = history("session", 3).history[0].parts[0] as StepFinishPart
     const event: Event = {
       id: "live",
       type: "message.part.updated",
@@ -103,10 +106,10 @@ test("replays live updates over a stale hydration response without double counti
 })
 
 test("a removal during hydration is not resurrected by the snapshot", async () => {
-  let resolve!: (value: CostHistory) => void
+  let resolve!: (value: CostSnapshot) => void
   const view = await mount(
     () =>
-      new Promise<CostHistory>((done) => {
+      new Promise<CostSnapshot>((done) => {
         resolve = done
       }),
   )
@@ -116,6 +119,53 @@ test("a removal during hydration is not resurrected by the snapshot", async () =
     await wait(() => !view.state.loading())
     expect(view.state.summary()?.total).toBe(0)
     expect(view.state.summary()?.models).toEqual([])
+  } finally {
+    view.app.renderer.destroy()
+  }
+})
+
+test("replays title completion over pending saved usage and updates late title charges once", async () => {
+  const pending: AuxiliaryUsage = {
+    id: "aux_title:0",
+    requestID: "aux_title",
+    step: 0,
+    sessionID: "session",
+    purpose: "title",
+    providerID: "paid",
+    modelID: "title-model",
+    status: "pending",
+    time: { created: 1, updated: 1 },
+  }
+  const complete: AuxiliaryUsage = {
+    ...pending,
+    status: "complete",
+    cost: 0.5,
+    tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: 1, updated: 2 },
+  }
+  let resolve!: (value: CostSnapshot) => void
+  const view = await mount(
+    () =>
+      new Promise<CostSnapshot>((done) => {
+        resolve = done
+      }),
+  )
+  try {
+    const event: Event = {
+      id: "title-finished",
+      type: "session.auxiliary_usage.updated",
+      properties: { sessionID: "session", usage: complete },
+    }
+    view.emit(event)
+    resolve({ ...history(), auxiliary: [pending] })
+    await wait(() => !view.state.loading())
+    expect(view.state.summary()?.total).toBe(1.5)
+    view.emit(event)
+    expect(view.state.summary()?.total).toBe(1.5)
+    view.emit({ ...event, properties: { sessionID: "session", usage: { ...complete, cost: 0.75 } } })
+    expect(view.state.summary()?.total).toBe(1.75)
+    expect(view.state.summary()?.models).toHaveLength(2)
+    expect(view.requests).toEqual(["session"])
   } finally {
     view.app.renderer.destroy()
   }
@@ -133,8 +183,8 @@ test("fetch failure stays unavailable and is handled without an unhandled reject
 })
 
 test("switching sessions cancels old ownership and ignores a late history response", async () => {
-  let resolve!: (value: CostHistory) => void
-  const pending = new Promise<CostHistory>((done) => {
+  let resolve!: (value: CostSnapshot) => void
+  const pending = new Promise<CostSnapshot>((done) => {
     resolve = done
   })
   const view = await mount((id) => (id === "session" ? pending : Promise.resolve(history(id, 2))))
@@ -156,10 +206,10 @@ test("switching sessions cancels old ownership and ignores a late history respon
 })
 
 test("leaving a session releases its history request and subscription without keeping its total", async () => {
-  let resolve!: (value: CostHistory) => void
+  let resolve!: (value: CostSnapshot) => void
   const view = await mount(
     () =>
-      new Promise<CostHistory>((done) => {
+      new Promise<CostSnapshot>((done) => {
         resolve = done
       }),
   )

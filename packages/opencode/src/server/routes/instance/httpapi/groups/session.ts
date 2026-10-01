@@ -80,6 +80,7 @@ export const SessionPaths = {
   status: `${root}/status`,
   get: `${root}/:sessionID`,
   children: `${root}/:sessionID/children`,
+  auxiliaryUsage: `${root}/:sessionID/auxiliary_usage`,
   todo: `${root}/:sessionID/todo`,
   diff: `${root}/:sessionID/diff`,
   messages: `${root}/:sessionID/message`,
@@ -139,6 +140,18 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.get",
             summary: "Get session",
             description: "Retrieve detailed information about a specific OpenCode session.",
+          }),
+        ),
+        HttpApiEndpoint.get("auxiliaryUsage", SessionPaths.auxiliaryUsage, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Array(SessionV1.AuxiliaryUsage), "Auxiliary model usage"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.auxiliaryUsage",
+            summary: "Get auxiliary model usage",
+            description: "Retrieve separately recorded model usage for session tasks such as title generation.",
           }),
         ),
         HttpApiEndpoint.get("children", SessionPaths.children, {

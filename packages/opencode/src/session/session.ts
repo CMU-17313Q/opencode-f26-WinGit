@@ -26,7 +26,7 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { PartTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { PartTable, SessionAuxiliaryUsageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { MessageV2 } from "./message-v2"
 import type { InstanceContext } from "../project/instance-context"
@@ -427,6 +427,8 @@ export interface Interface {
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
+  readonly auxiliaryUsage: (sessionID: SessionID) => Effect.Effect<SessionV1.AuxiliaryUsage[], NotFound>
+  readonly updateAuxiliaryUsage: (usage: SessionV1.AuxiliaryUsage) => Effect.Effect<void>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
   readonly setMetadata: (input: typeof SetMetadataInput.Type) => Effect.Effect<void>
@@ -905,6 +907,24 @@ const layer: Layer.Layer<
       return Option.none<SessionV1.WithParts>()
     })
 
+    const auxiliaryUsage: Interface["auxiliaryUsage"] = Effect.fn("Session.auxiliaryUsage")(function* (sessionID) {
+      yield* get(sessionID)
+      const rows = yield* db
+        .select()
+        .from(SessionAuxiliaryUsageTable)
+        .where(eq(SessionAuxiliaryUsageTable.session_id, sessionID))
+        .orderBy(SessionAuxiliaryUsageTable.id)
+        .all()
+        .pipe(Effect.orDie)
+      return rows.map((row) => row.data)
+    })
+
+    const updateAuxiliaryUsage: Interface["updateAuxiliaryUsage"] = Effect.fn("Session.updateAuxiliaryUsage")(
+      function* (usage) {
+        yield* events.publish(SessionV1.Event.AuxiliaryUsageUpdated, { sessionID: usage.sessionID, usage })
+      },
+    )
+
     return Service.of({
       list,
       listGlobal,
@@ -912,6 +932,8 @@ const layer: Layer.Layer<
       fork,
       touch,
       get,
+      auxiliaryUsage,
+      updateAuxiliaryUsage,
       setTitle,
       setArchived,
       setMetadata,

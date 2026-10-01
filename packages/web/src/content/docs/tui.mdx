@@ -151,10 +151,12 @@ Show the current session's estimated USD cost and input/output token totals, gro
 /cost
 ```
 
-The estimate includes earlier turns and compaction summaries, even when they are no longer visible in the conversation.
+The estimate includes retained earlier turns, compaction summaries, and automatic title requests recorded by this version.
+Title usage appears under the model that generated it, without increasing the context meter's count.
 Input totals include cached tokens; output totals include reasoning tokens. Costs use the recorded charge for each model
 step, including cache rates and context pricing tiers, rather than recalculating old turns using current prices.
 The prompt status bar and Context sidebar also update as model steps finish.
+Pending or incomplete title usage makes the total unavailable (`n/a`) until complete usage is reported.
 
 Models with zero rates and no recorded charge show `n/a`, since the provider catalogue does not distinguish free models
 from missing pricing. If any model's estimate is unavailable, the session total also shows `n/a`; it never presents a

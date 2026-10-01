@@ -7,6 +7,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
 import { Session } from "./session"
+import { SessionAuxiliaryUsage } from "./auxiliary-usage"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 
@@ -235,9 +236,8 @@ const layer = Layer.effect(
           messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
         })
         .pipe(
-          Stream.filter(LLMEvent.is.textDelta),
-          Stream.map((e) => e.text),
-          Stream.mkString,
+          (stream) => SessionAuxiliaryUsage.text({ sessionID: input.session.id, model: mdl }, stream),
+          Effect.provideService(Session.Service, sessions),
           Effect.orDie,
         )
       const cleaned = text
