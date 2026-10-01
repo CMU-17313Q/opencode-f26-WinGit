@@ -322,7 +322,7 @@ describe("tool.write", () => {
           expect(request?.patterns).toEqual(["main"])
           expect(request?.always).toEqual([])
           expect(request?.metadata.branch).toBe("main")
-          
+
           const content = yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))
           expect(content).toBe("protected branch content")
         }),
@@ -415,7 +415,7 @@ describe("tool.write", () => {
         },
       },
     )
-  
+
     it.instance(
       "does not modify the file when protected branch confirmation is rejected",
       () =>
