@@ -39,8 +39,9 @@ import { usePromptStash } from "../../prompt/stash"
 import { DialogStash } from "../dialog-stash"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
-import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
+import type { FilePart, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
+import { contextUsage } from "../../util/context-usage"
 import { errorMessage } from "../../util/error"
 import { formatDuration } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
@@ -261,22 +262,23 @@ export function Prompt(props: PromptProps) {
   const sessionCost = useSessionCost(() => props.sessionID)
   const usage = createMemo(() => {
     if (!props.sessionID) return
-    const msg = sync.data.message[props.sessionID] ?? []
-    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
-
-    const tokens = last
-      ? last.tokens.input +
-        last.tokens.output +
-        last.tokens.reasoning +
-        last.tokens.cache.read +
-        last.tokens.cache.write
-      : 0
-
-    const model = last && sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
-    const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
+    const selected = local.model.current()
+    const limit = selected
+      ? sync.data.provider.find((item) => item.id === selected.providerID)?.models[selected.modelID]?.limit.context
+      : undefined
+    const context = contextUsage(sync.data.message[props.sessionID] ?? [], limit) ?? {
+      used: 0,
+      total: limit || undefined,
+      percent: limit ? 0 : undefined,
+      warn: false,
+    }
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
+      context:
+        context.total !== undefined
+          ? `${Locale.number(context.used)} / ${Locale.number(context.total)} (${context.percent}%)`
+          : Locale.number(context.used),
       cost: sessionCost.loading() ? "cost …" : `${formatCost(sessionCost.summary()?.total)} est.`,
+      warn: context.warn,
     }
   })
 
@@ -1663,7 +1665,7 @@ export function Prompt(props: PromptProps) {
                   <Switch>
                     <Match when={usage()}>
                       {(item) => (
-                        <text fg={theme.textMuted} wrapMode="none">
+                        <text fg={item().warn ? theme.warning : theme.textMuted} wrapMode="none">
                           {[item().context, item().cost].filter(Boolean).join(" · ")}
                         </text>
                       )}

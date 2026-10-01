@@ -181,6 +181,7 @@ test("all cost views share one history load, update live, and stay isolated when
     )
     const initial = await frameContaining("$0.0123 estimated")
     expect(initial).toContain("$0.0123 est.")
+    expect(initial).toContain("120 / 10.0K (1%) · $0.0123 est.")
     expect(initial).toContain("Context")
     expect(historyLoads).toEqual([session.id])
 
@@ -209,6 +210,7 @@ test("all cost views share one history load, update live, and stay isolated when
     setup.mockInput.pressEscape()
     const closed = await frameContaining("$0.0456 est.")
     expect(closed).toContain("$0.0456 estimated")
+    expect(closed).toContain("120 / 10.0K (1%) · $0.0456 est.")
     expect(closed).not.toContain("Session cost")
     api!.keymap.dispatchCommand("session.cost")
     await frameContaining("Total (USD): $0.0456")
@@ -219,6 +221,7 @@ test("all cost views share one history load, update live, and stay isolated when
     api!.route.navigate("session", { sessionID: second.id })
     const switched = await frameContaining("$0.09 estimated")
     expect(switched).toContain("$0.09 est.")
+    expect(switched).toContain("120 / 10.0K (1%) · $0.09 est.")
     expect(switched).not.toContain("$0.0456")
     expect(historyLoads).toEqual([session.id, second.id])
     events.emit({
