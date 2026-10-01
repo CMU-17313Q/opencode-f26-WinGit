@@ -127,7 +127,7 @@ From the repository root, start a local run with the flag:
 bun dev run --summary "Read notes.txt, then replace 'old note' with 'new note'."
 ```
 
-Use an existing disposable file for this check, with the text `old note` in it. The summary describes the existing file before the `edit` tool applies the replacement. It prints an information block headed `Summary: <path>`. A delegated child task's summary or warning also appears in the run output. Ordinary child conversation output remains hidden.
+Run this example on a disposable feature branch, such as `summary-demo`, using an existing disposable file with the text `old note` in it. On a protected branch, the default non-interactive run rejects the branch request before generating a summary. The summary describes the existing file before the `edit` tool applies the replacement. It prints an information block headed `Summary: <path>`. A delegated child task's summary or warning also appears in the run output. Ordinary child conversation output remains hidden.
 
 The summary uses the run's selected model and may make an additional billable request. The file content sent for the summary is limited to the first 20,000 characters. The generated text can be inaccurate, so read the proposed edit as well. The flag summarizes existing files edited by the `edit` tool; it does not summarize new files, full-file replacements through `write`, shell commands, or remote `--attach` runs. It does not add a confirmation step.
 
@@ -190,3 +190,42 @@ bun typecheck
 ```
 
 The tool tests cover protected/feature branch checks and rejection before file changes. The patch regression rejects one add/update/delete patch and verifies that all files remain unchanged. The actual CLI tests use a Git repository on `main` with delegated editing, checking auto approval and default rejection, both with and without summaries. The rejection tests also check that no summary provider request is made. These tests use disposable files and local provider fixtures.
+
+## Retained file content with `/context`
+
+Feature: [Issue #4](https://github.com/CMU-17313Q/opencode-f26-WinGit/issues/4), [PR #10](https://github.com/CMU-17313Q/opencode-f26-WinGit/pull/10). Integration follow-up: use the session's retained history instead of the TUI display cache.
+
+In a TUI session, enter `/context`. The dialog lists one row for each file path found in retained `read`, `edit` or `write` tool messages, with an approximate text-token contribution. Rows follow the files' first appearance. Repeated reads keep one row, while their retained text contributions are added together. Press Escape to close the dialog. Close and reopen it after another tool call or compaction to get a fresh snapshot.
+
+The list follows the server's conversation-compaction selection, so files from messages older than the TUI's 100-message display window are still included when that text is retained. A cleared read result does not contribute its old content. Edit/write input text can remain in model history after its output was cleared or the operation failed; a listed path therefore does not prove a successful file change.
+
+Counts use roughly four text characters per token. They cover retained file-tool text, rather than the entire model input. System instructions, image/media tokens and runtime plugin transformations are outside this list. The context meter separately reports model usage; these row estimates are not expected to add up to that meter. Child sessions have their own context lists.
+
+A loading message appears while saved data is fetched. A failed request shows an error with a retry instruction; it does not claim the session is empty. A successful empty result shows a clear no-files message. Opening the dialog again fetches new data. Switching sessions replaces its data and cancels the old request.
+
+Manual checks:
+
+| Check                          | Steps                                                                                            | Expected result                                                                                                                       |
+| ------------------------------ | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| Five files and a repeated read | Ask the agent to read five disposable files, including one of them twice, then enter `/context`. | Five rows appear, in first-appearance order. The repeated path appears once.                                                          |
+| New file                       | Close the dialog, read another file, then run `/context` again.                                  | The new file appears at the bottom.                                                                                                   |
+| Empty session                  | Start a fresh session and open `/context`.                                                       | A no-files message appears without an error.                                                                                          |
+| Long history                   | Retain a read result, continue beyond 100 messages without compaction, and reopen the dialog.    | That early file still appears.                                                                                                        |
+| Compaction and pruning         | Note the list, compact the session or clear an old tool output, then reopen.                     | Only file-related text still retained by the server contributes to the list. A later reread restores the file's content contribution. |
+| Failure and navigation         | Open the dialog while its request fails or switch sessions during loading.                       | Failure is shown explicitly; the old session's response cannot replace the new session's list.                                        |
+
+Run the backend checks from `packages/opencode`:
+
+```sh
+bun test test/session/context-files.test.ts test/server/session-context-files.test.ts test/session/message-v2.test.ts
+bun typecheck
+```
+
+Run the UI checks from `packages/tui`:
+
+```sh
+bun test test/util/context-files.test.ts test/component/dialog-context.test.ts test/cli/tui/dialog-context.test.tsx test/session-context-app.test.tsx
+bun typecheck
+```
+
+The backend tests exercise actual compaction selection and model-history rules, including early files beyond 100 messages, cleared reads, repeated paths, edit/write inputs, interrupted results and assistant errors. The HTTP tests query saved session data through `GET /session/{sessionID}/context_files`, verify an unknown session returns 404, and check that inspection does not mutate history. UI tests cover row formatting, actual SDK requests, loading/error/empty states, cancellation, reopening, session changes and the registered `/context` command.

@@ -86,6 +86,12 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       return yield* requireSession(ctx.params.sessionID)
     })
 
+    const contextFiles = Effect.fn("SessionHttpApi.contextFiles")(function* (ctx: {
+      params: { sessionID: SessionID }
+    }) {
+      return yield* SessionError.mapStorageNotFound(session.contextFiles(ctx.params.sessionID))
+    })
+
     const auxiliaryUsage = Effect.fn("SessionHttpApi.auxiliaryUsage")(function* (ctx: {
       params: { sessionID: SessionID }
     }) {
@@ -421,6 +427,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("status", status)
       .handle("get", get)
       .handle("auxiliaryUsage", auxiliaryUsage)
+      .handle("contextFiles", contextFiles)
       .handle("children", children)
       .handle("todo", todo)
       .handle("diff", diff)

@@ -1,9 +1,11 @@
 import { TextAttributes } from "@opentui/core"
-import { For, Show, createMemo } from "solid-js"
+import { useTerminalDimensions } from "@opentui/solid"
+import { For, Match, Show, Switch, createMemo } from "solid-js"
 import { useTheme } from "../context/theme"
 import { useDialog } from "../ui/dialog"
-import { useSync } from "../context/sync"
-import { contextFiles, type ContextFile } from "../util/context-files"
+import { useSDK } from "../context/sdk"
+import { useProject } from "../context/project"
+import { createContextFiles, type ContextFile } from "../util/context-files"
 
 export type DialogContextFilesProps = {
   sessionID: string
@@ -14,15 +16,24 @@ export function contextFileRows(files: readonly ContextFile[]) {
 }
 
 export function DialogContextFiles(props: DialogContextFilesProps) {
-  const sync = useSync()
+  const sdk = useSDK()
+  const project = useProject()
   const { theme } = useTheme()
   const dialog = useDialog()
+  const dimensions = useTerminalDimensions()
   dialog.setSize("large")
 
-  const rows = createMemo(() => {
-    const messages = sync.data.message[props.sessionID] ?? []
-    return contextFileRows(contextFiles(messages.map((info) => ({ info, parts: sync.data.part[info.id] ?? [] }))))
-  })
+  const files = createContextFiles(
+    () => props.sessionID,
+    async (sessionID, signal) => {
+      const response = await sdk.client.session.contextFiles(
+        { sessionID, workspace: project.workspace.current() },
+        { signal, throwOnError: true },
+      )
+      return response.data
+    },
+  )
+  const rows = createMemo(() => contextFileRows(files.files))
 
   return (
     <box paddingLeft={2} paddingRight={2} gap={1} paddingBottom={1}>
@@ -34,22 +45,38 @@ export function DialogContextFiles(props: DialogContextFilesProps) {
           esc
         </text>
       </box>
-      <Show when={rows().length > 0} fallback={<text fg={theme.textMuted}>No files in context</text>}>
-        <box>
-          <For each={rows()}>
-            {(row) => (
-              <box flexDirection="row" gap={1} justifyContent="space-between">
-                <text fg={theme.text} wrapMode="none">
-                  {row.path}
-                </text>
-                <text fg={theme.textMuted} flexShrink={0}>
-                  {row.size}
-                </text>
+      <text fg={theme.textMuted}>Files from retained tool messages; approximate text tokens.</text>
+      <scrollbox maxHeight={Math.max(3, Math.floor(dimensions().height * 0.75) - 6)}>
+        <Switch>
+          <Match when={files.loading}>
+            <text fg={theme.textMuted}>Loading retained files…</text>
+          </Match>
+          <Match when={files.error}>
+            <text fg={theme.warning}>Could not load retained files. Close and reopen to retry.</text>
+          </Match>
+          <Match when={!files.loading && !files.error}>
+            <Show
+              when={rows().length > 0}
+              fallback={<text fg={theme.textMuted}>No files in retained tool messages.</text>}
+            >
+              <box>
+                <For each={rows()}>
+                  {(row) => (
+                    <box flexDirection="row" gap={1} justifyContent="space-between">
+                      <text fg={theme.text} wrapMode="none">
+                        {row.path}
+                      </text>
+                      <text fg={theme.textMuted} flexShrink={0}>
+                        {row.size}
+                      </text>
+                    </box>
+                  )}
+                </For>
               </box>
-            )}
-          </For>
-        </box>
-      </Show>
+            </Show>
+          </Match>
+        </Switch>
+      </scrollbox>
     </box>
   )
 }

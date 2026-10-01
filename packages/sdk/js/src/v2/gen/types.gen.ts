@@ -9733,6 +9733,43 @@ export type SessionUpdateResponses = {
 
 export type SessionUpdateResponse = SessionUpdateResponses[keyof SessionUpdateResponses]
 
+export type SessionContextFilesData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/context_files"
+}
+
+export type SessionContextFilesErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionContextFilesError = SessionContextFilesErrors[keyof SessionContextFilesErrors]
+
+export type SessionContextFilesResponses = {
+  /**
+   * Retained file-tool text and approximate token contributions
+   */
+  200: Array<{
+    path: string
+    tokens: number
+  }>
+}
+
+export type SessionContextFilesResponse = SessionContextFilesResponses[keyof SessionContextFilesResponses]
+
 export type SessionAuxiliaryUsageData = {
   body?: never
   path: {

@@ -428,6 +428,7 @@ export interface Interface {
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
   readonly auxiliaryUsage: (sessionID: SessionID) => Effect.Effect<SessionV1.AuxiliaryUsage[], NotFound>
+  readonly contextFiles: (sessionID: SessionID) => Effect.Effect<{ path: string; tokens: number }[], NotFound>
   readonly updateAuxiliaryUsage: (usage: SessionV1.AuxiliaryUsage) => Effect.Effect<void>
   readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number }) => Effect.Effect<void>
@@ -907,6 +908,14 @@ const layer: Layer.Layer<
       return Option.none<SessionV1.WithParts>()
     })
 
+    const contextFiles: Interface["contextFiles"] = Effect.fn("Session.contextFiles")(function* (sessionID) {
+      yield* get(sessionID)
+      const messages = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
+        Effect.provideService(Database.Service, database),
+      )
+      return MessageV2.contextFiles(messages)
+    })
+
     const auxiliaryUsage: Interface["auxiliaryUsage"] = Effect.fn("Session.auxiliaryUsage")(function* (sessionID) {
       yield* get(sessionID)
       const rows = yield* db
@@ -933,6 +942,7 @@ const layer: Layer.Layer<
       touch,
       get,
       auxiliaryUsage,
+      contextFiles,
       updateAuxiliaryUsage,
       setTitle,
       setArchived,

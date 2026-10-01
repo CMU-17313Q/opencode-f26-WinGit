@@ -780,8 +780,9 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         enabled: () => route.data.type === "session",
         run: () => {
           if (route.data.type !== "session") return
-          const sessionID = route.data.sessionID
-          dialog.replace(() => <DialogContextFiles sessionID={sessionID} />)
+          dialog.replace(() => (
+            <DialogContextFiles sessionID={route.data.type === "session" ? route.data.sessionID : ""} />
+          ))
         },
         category: "Session",
       },

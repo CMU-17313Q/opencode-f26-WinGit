@@ -81,6 +81,7 @@ export const SessionPaths = {
   get: `${root}/:sessionID`,
   children: `${root}/:sessionID/children`,
   auxiliaryUsage: `${root}/:sessionID/auxiliary_usage`,
+  contextFiles: `${root}/:sessionID/context_files`,
   todo: `${root}/:sessionID/todo`,
   diff: `${root}/:sessionID/diff`,
   messages: `${root}/:sessionID/message`,
@@ -140,6 +141,27 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.get",
             summary: "Get session",
             description: "Retrieve detailed information about a specific OpenCode session.",
+          }),
+        ),
+        HttpApiEndpoint.get("contextFiles", SessionPaths.contextFiles, {
+          params: { sessionID: SessionID },
+          query: WorkspaceRoutingQuery,
+          success: described(
+            Schema.Array(
+              Schema.Struct({
+                path: Schema.String,
+                tokens: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+              }),
+            ),
+            "Retained file-tool text and approximate token contributions",
+          ),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "session.contextFiles",
+            summary: "Get retained file-tool context",
+            description:
+              "List file-tool text retained after conversation compaction and output pruning. Counts are approximate and exclude system instructions, media, and runtime plugin transformations.",
           }),
         ),
         HttpApiEndpoint.get("auxiliaryUsage", SessionPaths.auxiliaryUsage, {
