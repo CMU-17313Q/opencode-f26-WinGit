@@ -180,7 +180,7 @@ To customize the list, add this field to `opencode.json`; it replaces the defaul
 
 An empty list disables the check. Existing permission configuration can also allow or deny `protected_branch`. The feature uses the local Git branch and configured names, rather than GitHub's protection settings. It does not cover shell commands or other tools.
 
-In non-interactive `opencode run`, an ask request is rejected by default. `--auto`, `--yolo` and `--dangerously-skip-permissions` automatically approve it once, including a known child task's protected-branch request. For a manual check, use a disposable repository on `main`: reject an edit and confirm the file remains unchanged; then allow one edit and confirm it completes. Repeat on a feature branch and check that no branch warning appears. If using `--summary`, rejection should happen before a summary request is made.
+In non-interactive `opencode run`, an ask request is rejected by default. `--auto`, `--yolo` and `--dangerously-skip-permissions` automatically approve it once, including a known child task's protected-branch request. The TUI's automatic approval mode also approves branch requests without showing a confirmation. Use manual approval mode to see the warning. For a manual check, use a disposable repository on `main`: reject an edit and confirm the file remains unchanged; then allow one edit and confirm it completes. Repeat on a feature branch and check that no branch warning appears. If using `--summary`, rejection should happen before a summary request is made.
 
 From `packages/opencode`, run:
 
