@@ -1,4 +1,4 @@
-import { SessionID, MessageID } from "./schema"
+import { SessionID, MessageID, PartID } from "./schema"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import {
@@ -612,8 +612,25 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
   return result
 }
 
-export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: SessionID) {
-  return filterCompacted(yield* stream(sessionID))
+function filterReverted(msgs: WithParts[], revert?: { messageID: MessageID; partID?: PartID }) {
+  if (!revert) return msgs
+  // Match SessionRevert.cleanup on this newest-first stream without deleting
+  // the stored messages or parts, so /redo can still restore them.
+  const index = msgs.findIndex((msg) => msg.info.id === revert.messageID)
+  const target = msgs[index]
+  if (!target) return msgs
+  if (!revert.partID) return msgs.slice(index + 1)
+  const part = target.parts.findIndex((part) => part.id === revert.partID)
+  if (part < 0) return msgs.slice(index)
+  return [{ ...target, parts: target.parts.slice(0, part) }, ...msgs.slice(index + 1)]
+}
+
+export const filterCompactedEffect = Effect.fnUntraced(function* (
+  sessionID: SessionID,
+  revert?: { messageID: MessageID; partID?: PartID },
+) {
+  // Apply undo before compaction: a reverted summary must not hide older text.
+  return filterCompacted(filterReverted(yield* stream(sessionID), revert))
 })
 
 // filterCompacted reorders messages for model consumption

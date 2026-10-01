@@ -909,8 +909,8 @@ const layer: Layer.Layer<
     })
 
     const contextFiles: Interface["contextFiles"] = Effect.fn("Session.contextFiles")(function* (sessionID) {
-      yield* get(sessionID)
-      const messages = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
+      const session = yield* get(sessionID)
+      const messages = yield* MessageV2.filterCompactedEffect(sessionID, session.revert).pipe(
         Effect.provideService(Database.Service, database),
       )
       return MessageV2.contextFiles(messages)
