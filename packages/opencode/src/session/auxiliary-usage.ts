@@ -5,9 +5,9 @@ import type { Provider } from "@/provider/provider"
 import type { SessionID } from "./schema"
 import { Session } from "./session"
 
-/** Collect title text while recording each provider step independently of messages. */
+/** Collect auxiliary text while recording each provider step independently of messages. */
 export const text = <E, R>(
-  input: { sessionID: SessionID; model: Provider.Model },
+  input: { sessionID: SessionID; model: Provider.Model; purpose?: SessionV1.AuxiliaryUsage["purpose"] },
   stream: Stream.Stream<LLMEvent, E, R>,
 ) =>
   Effect.gen(function* () {
@@ -21,7 +21,7 @@ export const text = <E, R>(
       sessionID: input.sessionID,
       requestID,
       step,
-      purpose: "title",
+      purpose: input.purpose ?? "title",
       providerID: input.model.providerID,
       modelID: input.model.id,
       status: "pending",

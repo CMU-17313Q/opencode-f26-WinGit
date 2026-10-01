@@ -644,7 +644,7 @@ export type AuxiliaryUsage = {
   sessionID: string
   requestID: string
   step: number
-  purpose: "title"
+  purpose: "title" | "edit-summary"
   providerID: string
   modelID: string
   status: "pending" | "complete" | "unavailable"

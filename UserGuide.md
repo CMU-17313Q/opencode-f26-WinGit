@@ -26,7 +26,7 @@ Connect a provider using OpenCode's normal `/connect` flow, then choose a model 
 
 The estimate updates as completed model steps arrive. Input includes cache-read and cache-write tokens; output includes reasoning tokens. Multiple model calls in one reply are counted separately. A model switch adds a separate row, even if the providers use the same model name.
 
-Automatic title generation is also recorded, using the model that actually generated the title. It can add a row for a smaller model even when you did not switch models yourself. These records are saved separately from the conversation, so they do not increase the context meter's token count or add chat messages. If title usage arrives after the main reply, the estimate updates again.
+Automatic title generation and pre-edit summaries are also recorded, using the model that actually made each request. A title can add a row for a smaller model even when you did not switch models yourself. These records are saved separately from the conversation, so they do not increase the context meter's token count or add chat messages. If auxiliary usage arrives after the main reply, the estimate updates again. Each session shows its own calls: a child task's summary charge belongs to the child session and is not added to the parent total.
 
 Costs come from the server's recorded charges for each step. The server applies model pricing, including cache and context-size tiers. Old steps are not repriced using today's catalog rates. The total covers retained session history, including turns before compaction and beyond the TUI's 100-message display window. It is a session estimate, not the account's monthly bill.
 
@@ -48,6 +48,7 @@ Costs come from the server's recorded charges for each step. The server applies 
 | New session and live updates | Start a session; send two short prompts; open `/cost`.                                                       | An empty session starts at zero. New recorded usage updates the prompt, sidebar, and open dialog consistently.                                                                                   |
 | Multiple models              | Complete a reply, select a different model with `/models`, then complete another reply.                      | `/cost` has separate provider/model rows. The total includes both when both have pricing.                                                                                                        |
 | Background title usage       | Start a new session; wait for its title and first reply, then inspect `/cost`. Leave and reopen the session. | The saved title request is included under its actual model. Reopening does not lose or duplicate it. The context meter still counts conversation context only.                                   |
+| Pre-edit summary usage       | Run a file edit with `opencode run --summary`, then reopen that session in the TUI and inspect `/cost`.      | The completed summary request appears under its actual model exactly once. A child task's summary appears in the child session's cost.                                                           |
 | Unavailable pricing          | Use a model with zero recorded cost and missing or all-zero catalog prices.                                  | The relevant cost is `n/a`; the dialog remains usable and no missing price is presented as a zero bill. A positive recorded charge remains usable even if the model is missing from the catalog. |
 | Compaction and history       | Note the estimate, run `/compact`, and reopen `/cost` after it finishes.                                     | Earlier retained charges remain included. Compaction may add its own model charge, so an identical total is not required.                                                                        |
 | Session isolation            | Switch to a different session, then return.                                                                  | Each session shows only its own usage. Returning loads its retained history.                                                                                                                     |
@@ -69,16 +70,17 @@ To run only the cost tests from `packages/tui`:
 bun test test/util/session-cost.test.ts test/context/session-cost.test.tsx test/cli/tui/dialog-cost.test.tsx test/session-cost-app.test.tsx
 ```
 
-| Test file                                                                               | Coverage                                                                                                                                                                                                                                 |
-| --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Ledger tests](packages/tui/test/util/session-cost.test.ts)                             | Multi-step and title charges, cached/reasoning tokens, recorded prices, model grouping, missing prices/usage, duplicate or stale events, legacy messages, compaction history, and more than 100 messages.                                |
-| [Reactive resource tests](packages/tui/test/context/session-cost.test.tsx)              | Live message/title events arriving during history loading, removals, load failures, and aborting requests/releasing subscriptions when switching or leaving a session.                                                                   |
-| [Dialog tests](packages/tui/test/cli/tui/dialog-cost.test.tsx)                          | Loading/error/empty states, model rows, unavailable pricing, live updates, small terminals, and Escape handling through the real keymap.                                                                                                 |
-| [Application test](packages/tui/test/session-cost-app.test.tsx)                         | Runs the real TUI, opens the command through its registry, and checks that all three views share one load of each usage source, include title usage, update live, preserve the context count, and stay isolated when switching sessions. |
-| [Auxiliary storage tests](packages/opencode/test/session/auxiliary-usage.test.ts)       | Durable replacement and event consistency, retention after renaming/deleting a message, fork isolation, and deletion with the session.                                                                                                   |
-| [Auxiliary stream tests](packages/opencode/test/session/auxiliary-usage-stream.test.ts) | Step usage, duplicate events, failure/cancellation, missing usage, and retaining billed steps after title processing fails.                                                                                                              |
-| [Title integration tests](packages/opencode/test/session/prompt.test.ts)                | Runs automatic title generation through the real prompt loop against a local test provider, with distinct title/main models and present or empty title text.                                                                             |
-| [Usage endpoint tests](packages/opencode/test/server/session-auxiliary-usage.test.ts)   | Real HTTP responses for saved/empty usage and missing sessions, without inserting conversation messages.                                                                                                                                 |
+| Test file                                                                               | Coverage                                                                                                                                                                                                                                        |
+| --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Ledger tests](packages/tui/test/util/session-cost.test.ts)                             | Main, title and pre-edit summary charges within the owning session, cached/reasoning tokens, recorded prices, model grouping, missing prices/usage, duplicate or stale events, legacy messages, compaction history, and more than 100 messages. |
+| [Reactive resource tests](packages/tui/test/context/session-cost.test.tsx)              | Live message/title events arriving during history loading, removals, load failures, and aborting requests/releasing subscriptions when switching or leaving a session.                                                                          |
+| [Dialog tests](packages/tui/test/cli/tui/dialog-cost.test.tsx)                          | Loading/error/empty states, model rows, unavailable pricing, live updates, small terminals, and Escape handling through the real keymap.                                                                                                        |
+| [Application test](packages/tui/test/session-cost-app.test.tsx)                         | Runs the real TUI, opens the command through its registry, and checks that all three views share one load of each usage source, include title usage, update live, preserve the context count, and stay isolated when switching sessions.        |
+| [Auxiliary storage tests](packages/opencode/test/session/auxiliary-usage.test.ts)       | Durable replacement and event consistency, retention after renaming/deleting a message, fork isolation, and deletion with the session.                                                                                                          |
+| [Auxiliary stream tests](packages/opencode/test/session/auxiliary-usage-stream.test.ts) | Step usage, duplicate events, failure/cancellation, missing usage, and retaining billed steps after title processing fails.                                                                                                                     |
+| [Title integration tests](packages/opencode/test/session/prompt.test.ts)                | Runs automatic title generation through the real prompt loop against a local test provider, with distinct title/main models and present or empty title text.                                                                                    |
+| [Usage endpoint tests](packages/opencode/test/server/session-auxiliary-usage.test.ts)   | Real HTTP responses for saved/empty usage and missing sessions, without inserting conversation messages.                                                                                                                                        |
+| [Pre-edit summary tests](packages/opencode/test/tool/edit-summary.test.ts)              | Actual selected model, pending record before provider execution, durable usage after reload, and provider cancellation on timeout or user abort.                                                                                                |
 
 The existing [server pricing tests](packages/opencode/test/session/compaction.test.ts), under `SessionNs.getUsage`, cover fixed prices, cache/reasoning usage, and pricing tiers. From `packages/opencode`, run:
 
@@ -101,7 +103,7 @@ This is acceptance criterion 5 in Issue #6 and remains a separate manual check.
 
 1. Use a dedicated provider key/project, or a quiet period with no other requests, so the provider's usage can be matched to this session. Record the provider, model, time window, and session ID locally.
 2. Start a new session with a priced model, send a short prompt, and capture the `/cost` amount and token breakdown after the response finishes.
-3. Wait for the provider's usage dashboard to update. Select the matching requests/time window and compare the USD usage charge before account-level credits, taxes, or unrelated charges. Include auxiliary requests generated by the session, such as automatic title generation, and investigate any difference rather than silently excluding charges.
+3. Wait for the provider's usage dashboard to update. Select the matching requests/time window and compare the USD usage charge before account-level credits, taxes, or unrelated charges. Include auxiliary requests generated by the session, such as automatic title generation or pre-edit summaries, and investigate any difference rather than silently excluding charges. If the run delegates to child sessions, compare each session separately or explicitly sum all matching session totals; the parent's `/cost` does not include child-session calls.
 4. For a positive provider charge, calculate `100 * abs(OpenCode estimate - provider charge) / provider charge`. Use enough precision to avoid rounding a tiny charge to zero. The target is roughly 10% or less.
 5. Record both amounts, the percentage difference, and redacted supporting evidence in the PR. If the provider reports only a rounded zero, collect a more precise usage view; that result cannot establish a percentage match.
 
@@ -109,8 +111,44 @@ The Sprint 1 demo uses synthetic usage data and does not complete this billing c
 
 ### Scope and compatibility
 
-Title calls made by this version have separate durable usage records. Title charges from older sessions cannot be reconstructed from chat messages. A fork retains its copied conversation history, but does not copy the original session's title charges. Deleting a conversation message does not erase a separately recorded title charge; deleting its session removes both.
+Title and pre-edit summary calls made by this version have separate durable usage records. Auxiliary charges from older sessions cannot be reconstructed from chat messages. A fork retains its copied conversation history, but does not copy the original session's auxiliary charges. Deleting a conversation message does not erase a separately recorded auxiliary charge; deleting its session removes both.
 
-The new `GET /session/{sessionID}/auxiliary_usage` endpoint and `session.auxiliary_usage.updated` event expose these records. Existing `SessionInfo.cost` and token fields keep their conversation-step semantics; the three TUI cost views combine both sources. The auxiliary records currently cover automatic title generation, not arbitrary third-party plugins or another session's calls.
+The new `GET /session/{sessionID}/auxiliary_usage` endpoint and `session.auxiliary_usage.updated` event expose these records. Existing `SessionInfo.cost` and token fields keep their conversation-step semantics; the three TUI cost views combine both sources. The auxiliary records cover automatic title generation and pre-edit summaries, with purpose values `title` and `edit-summary`. They do not cover arbitrary third-party plugins or another session's calls.
 
 The real-session billing criterion remains open until the documented provider comparison is performed. Passing fixture tests does not establish agreement with an external bill.
+
+## Pre-edit file summaries with `--summary`
+
+Feature implementation: Yasa Khan, [Issue #3](https://github.com/CMU-17313Q/opencode-f26-WinGit/issues/3) and [PR #11](https://github.com/CMU-17313Q/opencode-f26-WinGit/pull/11). Integration follow-up: cancellation, descendant visibility and auxiliary cost recording.
+
+From the repository root, start a local run with the flag:
+
+```sh
+bun dev run --summary "Read notes.txt, then replace 'old note' with 'new note'."
+```
+
+Use an existing disposable file for this check, with the text `old note` in it. The summary describes the existing file before the `edit` tool applies the replacement. It prints an information block headed `Summary: <path>`. A delegated child task's summary or warning also appears in the run output. Ordinary child conversation output remains hidden.
+
+The summary uses the run's selected model and may make an additional billable request. The file content sent for the summary is limited to the first 20,000 characters. The generated text can be inaccurate, so read the proposed edit as well. The flag summarizes existing files edited by the `edit` tool; it does not summarize new files, full-file replacements through `write`, shell commands, or remote `--attach` runs. It does not add a confirmation step.
+
+A summary timeout (10 seconds) or provider failure prints a warning and lets the normal edit flow continue. Cancelling the run interrupts the provider request and prevents a still-pending edit from writing the file. Cancellation cannot undo an edit that has already completed. Recorded completed usage is retained; missing or incomplete usage is shown as `n/a` in `/cost`.
+
+Manual checks:
+
+| Check               | Steps                                                           | Expected result                                                                                                  |
+| ------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Existing file       | Run the example above against a disposable file.                | The summary describes the old content before the successful edit output. The file then contains the replacement. |
+| No flag             | Repeat the edit without `--summary`.                            | No pre-edit summary request or information block is added.                                                       |
+| Selected model      | Choose a model with `--model provider/model` and repeat.        | The summary uses that model; reopening the run's session shows its saved usage under that model in `/cost`.      |
+| User cancellation   | Cancel while summary generation is still running.               | The outstanding provider request is aborted and the file remains unchanged.                                      |
+| Unavailable summary | Use the automated failure fixture below.                        | The warning appears, then the normal edit succeeds. No complete estimate is invented for missing summary usage.  |
+| Delegated edit      | Use a prompt that delegates the disposable file edit to a task. | The run prints that child task's summary or warning. Its charge is recorded in the child session.                |
+
+Run the automated checks from `packages/opencode`:
+
+```sh
+bun test test/tool/edit-summary.test.ts test/tool/edit.test.ts test/cli/run/run-summary.test.ts test/cli/run/run-flags.test.ts
+bun typecheck
+```
+
+[Summary helper tests](packages/opencode/test/tool/edit-summary.test.ts) exercise model selection, real provider-stream abort signals, durable pending-before-execution records and usage after reload. [Edit tool tests](packages/opencode/test/tool/edit.test.ts) verify unchanged files on cancellation and successful editing after a summary timeout or provider failure. [CLI integration tests](packages/opencode/test/cli/run/run-summary.test.ts) run actual `task → edit` flows against a local provider fixture, verify summary-before-edit ordering and child warnings, and replay duplicate, nested and unrelated events. They also preserve JSON output behavior. These fixtures do not use a paid provider.

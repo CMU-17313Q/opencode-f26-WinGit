@@ -33,7 +33,7 @@ const model: Provider.Model = {
   release_date: "2026-01-01",
 }
 
-function recorder() {
+function recorder(purpose: SessionV1.AuxiliaryUsage["purpose"] = "title") {
   const records = new Map<string, SessionV1.AuxiliaryUsage>()
   const layer = Layer.mock(Session.Service, {
     updateAuxiliaryUsage: (usage) =>
@@ -41,13 +41,25 @@ function recorder() {
         records.set(usage.id, usage)
       }),
   })
-  const input = { sessionID: SessionID.create(), model }
+  const input = { sessionID: SessionID.create(), model, purpose }
   return {
     records,
     run: <E, R>(stream: Stream.Stream<LLMEvent, E, R>) =>
       SessionAuxiliaryUsage.text(input, stream).pipe(Effect.provide(layer)),
   }
 }
+
+it.effect("records pre-edit summaries with their purpose and actual model", () =>
+  Effect.gen(function* () {
+    const record = recorder("edit-summary")
+    yield* record.run(
+      Stream.make(LLMEvent.stepFinish({ index: 0, reason: "stop", usage: { inputTokens: 1000, outputTokens: 100 } })),
+    )
+    expect([...record.records.values()]).toMatchObject([
+      { purpose: "edit-summary", providerID: model.providerID, modelID: model.id, status: "complete", cost: 0.0024 },
+    ])
+  }),
+)
 
 it.effect("records each billed step once, attributes the actual model and ignores aggregate finish", () =>
   Effect.gen(function* () {

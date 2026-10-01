@@ -29,6 +29,10 @@ describe("legacy public event schemas", () => {
     })
     expect(Object.hasOwn(usage, "cost")).toBe(false)
     expect(Object.hasOwn(usage, "tokens")).toBe(false)
+    expect(Schema.decodeUnknownSync(SessionV1.AuxiliaryUsage)({ ...usage, purpose: "edit-summary" }).purpose).toBe(
+      "edit-summary",
+    )
+    expect(() => Schema.decodeUnknownSync(SessionV1.AuxiliaryUsage)({ ...usage, purpose: "arbitrary-call" })).toThrow()
   })
   test("owns all SessionV1 definitions", () => {
     expect(SessionV1.Event.Definitions.map((event) => event.type)).toEqual([

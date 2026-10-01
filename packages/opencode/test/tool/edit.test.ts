@@ -17,6 +17,11 @@ import { testEffect } from "../lib/effect"
 import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 import { Provider } from "@/provider/provider"
 import { ProviderTest } from "../fake/provider"
+import { Session } from "@/session/session"
+import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { EditSummaryFlag } from "@/tool/edit-summary-flag"
+import type { LanguageModelV3, LanguageModelV3StreamPart } from "@ai-sdk/provider"
+import { TestClock } from "effect/testing"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-edit-session"),
@@ -35,7 +40,17 @@ afterEach(async () => {
 
 const provider = ProviderTest.fake()
 const layer = LayerNode.compile(
-  LayerNode.group([LSP.node, FSUtil.node, Format.node, EventV2Bridge.node, Truncate.node, Agent.node, Provider.node]),
+  LayerNode.group([
+    LSP.node,
+    FSUtil.node,
+    Format.node,
+    EventV2Bridge.node,
+    Truncate.node,
+    Agent.node,
+    Provider.node,
+    Session.node,
+    SessionProjector.node,
+  ]),
   [[Provider.node, provider.layer]],
 )
 
@@ -94,6 +109,98 @@ const onceBus = Effect.fn("EditToolTest.onceBus")(function* (def: typeof Watcher
 })
 
 describe("tool.edit", () => {
+  for (const outcome of ["cancel", "timeout", "failure", "cancel-after-summary"] as const) {
+    it.instance(`summary ${outcome} respects cancellation and fail-open boundaries`, () =>
+      Effect.gen(function* () {
+        const before = EditSummaryFlag.isEnabled()
+        EditSummaryFlag.set(true)
+        yield* Effect.addFinalizer(() => Effect.sync(() => EditSummaryFlag.set(before)))
+        const test = yield* TestInstance
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Pinned" })
+        const filepath = path.join(test.directory, "summary.txt")
+        yield* put(filepath, "old content")
+        const controller = new AbortController()
+        const started = yield* Deferred.make<AbortSignal>()
+        const metadata: unknown[] = []
+        const language: LanguageModelV3 = {
+          specificationVersion: "v3",
+          provider: "test",
+          modelId: "summary",
+          supportedUrls: {},
+          doGenerate: async () => {
+            throw new Error("unexpected non-streaming request")
+          },
+          doStream: async (options) => ({
+            stream: new ReadableStream<LanguageModelV3StreamPart>({
+              start(stream) {
+                const signal = options.abortSignal!
+                Deferred.doneUnsafe(started, Effect.succeed(signal))
+                if (outcome === "failure") {
+                  stream.enqueue({ type: "error", error: new Error("provider failed") })
+                  stream.close()
+                  return
+                }
+                if (outcome === "cancel-after-summary") {
+                  stream.enqueue({ type: "text-start", id: "summary" })
+                  stream.enqueue({ type: "text-delta", id: "summary", delta: "Summary" })
+                  stream.enqueue({ type: "text-end", id: "summary" })
+                  stream.enqueue({
+                    type: "finish",
+                    finishReason: { unified: "stop", raw: "stop" },
+                    usage: {
+                      inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
+                      outputTokens: { total: 2, text: 2, reasoning: 0 },
+                    },
+                  })
+                  stream.close()
+                  return
+                }
+                signal.addEventListener("abort", () => stream.error(new DOMException("aborted", "AbortError")), {
+                  once: true,
+                })
+              },
+            }),
+          }),
+        }
+        const base = yield* Provider.Service
+        const fiber = yield* run(
+          { filePath: filepath, oldString: "old", newString: "new" },
+          {
+            ...ctx,
+            sessionID: chat.id,
+            abort: controller.signal,
+            extra: { model: provider.model },
+            metadata: (value) =>
+              Effect.sync(() => {
+                metadata.push(value.metadata)
+              }),
+            ask: () =>
+              Effect.sync(() => {
+                if (outcome === "cancel-after-summary") controller.abort()
+              }),
+          },
+        ).pipe(
+          Effect.provideService(Provider.Service, { ...base, getLanguage: () => Effect.succeed(language) }),
+          Effect.forkChild,
+        )
+        const signal = yield* Deferred.await(started)
+        if (outcome === "cancel") controller.abort()
+        if (outcome === "timeout") yield* TestClock.adjust("10 seconds")
+        const exit = yield* Fiber.await(fiber)
+        const cancelled = outcome === "cancel" || outcome === "cancel-after-summary"
+        expect(Exit.isFailure(exit)).toBe(cancelled)
+        if (Exit.isFailure(exit)) expect(Cause.hasInterrupts(exit.cause)).toBe(true)
+        expect(yield* load(filepath)).toBe(cancelled ? "old content" : "new content")
+        expect(signal.aborted).toBe(true)
+        if (!cancelled) expect(metadata).toContainEqual({ summaryFailed: true })
+        const usage = yield* sessions.auxiliaryUsage(chat.id)
+        expect(usage).toHaveLength(1)
+        expect(usage[0]?.status).toBe(outcome === "cancel-after-summary" ? "complete" : "unavailable")
+      }).pipe(Effect.provide(TestClock.layer())),
+    )
+  }
+
   describe("creating new files", () => {
     it.instance("creates new file when oldString is empty", () =>
       Effect.gen(function* () {

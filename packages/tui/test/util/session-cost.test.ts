@@ -58,6 +58,28 @@ function title(overrides: Partial<AuxiliaryUsage> = {}): AuxiliaryUsage {
 }
 
 describe("session cost accounting", () => {
+  test("counts main replies, titles and pre-edit summaries once within the owning session", () => {
+    const ledger = createSessionCostLedger("session")
+    const summary = title({ id: "aux_summary:0", requestID: "aux_summary", purpose: "edit-summary", cost: 0.0003 })
+    ledger.hydrate([{ info: assistant(), parts: [step()] }], [title(), summary])
+    ledger.apply({
+      id: "summary-duplicate",
+      type: "session.auxiliary_usage.updated",
+      properties: { sessionID: "session", usage: summary },
+    })
+    expect(ledger.summarize(providers).total).toBeCloseTo(0.0015)
+    expect(ledger.summarize(providers).models.find((row) => row.modelID === "small")).toMatchObject({
+      input: 100,
+      output: 14,
+      cost: 0.0005,
+    })
+    ledger.apply({
+      id: "child-summary",
+      type: "session.auxiliary_usage.updated",
+      properties: { sessionID: "child", usage: { ...summary, id: "aux_child:0", sessionID: "child", cost: 50 } },
+    })
+    expect(ledger.summarize(providers).total).toBeCloseTo(0.0015)
+  })
   test("includes title usage under its actual model without needing a visible message", () => {
     const ledger = createSessionCostLedger("session")
     ledger.hydrate([{ info: assistant(), parts: [step()] }], [title()])

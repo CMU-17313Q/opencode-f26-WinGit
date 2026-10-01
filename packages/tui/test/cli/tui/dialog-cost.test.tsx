@@ -136,7 +136,9 @@ test("renders separate model usage rows and the explanation in an 80x24 terminal
   expect(frame).toContain("Output: 78")
   expect(frame).toContain("Cost: $0.0456")
   expect(frame).toContain("Total (USD): $0.0579")
-  expect(frame.replace(/\s+/g, " ")).toContain("Estimates include compacted turns and recorded title generation.")
+  expect(frame.replace(/\s+/g, " ")).toContain(
+    "Estimates include compacted turns, recorded titles, and pre-edit summaries for this session.",
+  )
   expect(frame.replace(/\s+/g, " ")).toContain("output includes reasoning tokens.")
 
   const lines = frame.split("\n").map((line) => line.trim())

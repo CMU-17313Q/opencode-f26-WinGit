@@ -21,6 +21,7 @@ import * as Bom from "@/util/bom"
 import { Provider } from "@/provider/provider"
 import { EditSummary } from "./edit-summary"
 import { EditSummaryFlag } from "./edit-summary-flag"
+import { Session } from "@/session/session"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -66,12 +67,14 @@ export const EditTool = Tool.define(
     const format = yield* Format.Service
     const events = yield* EventV2Bridge.Service
     const provider = yield* Provider.Service
+    const sessions = yield* Session.Service
 
     return {
       description: DESCRIPTION,
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
+          if (ctx.abort.aborted) return yield* Effect.interrupt
           if (!params.filePath) {
             throw new Error("filePath is required")
           }
@@ -112,6 +115,7 @@ export const EditTool = Tool.define(
                     diff,
                   },
                 })
+                if (ctx.abort.aborted) return yield* Effect.interrupt
                 yield* afs.writeWithDirs(filePath, Bom.join(contentNew, desiredBom))
                 if (yield* format.file(filePath)) {
                   contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)
@@ -150,9 +154,15 @@ export const EditTool = Tool.define(
                 const summary = yield* EditSummary.summarizeFile({
                   provider,
                   model: ctx.extra?.model as Provider.Model | undefined,
+                  sessionID: ctx.sessionID,
+                  abort: ctx.abort,
                   path: filePath,
                   content: contentOld,
-                }).pipe(Effect.catch(() => Effect.succeed(undefined)))
+                }).pipe(
+                  Effect.provideService(Session.Service, sessions),
+                  Effect.catch(() => Effect.succeed(undefined)),
+                )
+                if (ctx.abort.aborted) return yield* Effect.interrupt
                 yield* ctx.metadata({ metadata: summary ? { summary } : { summaryFailed: true } })
               }
               yield* ctx.ask({
@@ -165,6 +175,7 @@ export const EditTool = Tool.define(
                 },
               })
 
+              if (ctx.abort.aborted) return yield* Effect.interrupt
               yield* afs.writeWithDirs(filePath, Bom.join(contentNew, desiredBom))
               if (yield* format.file(filePath)) {
                 contentNew = yield* Bom.syncFile(afs, filePath, desiredBom)

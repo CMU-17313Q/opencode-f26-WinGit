@@ -73,8 +73,8 @@ export function CostView(props: {
                     </box>
                   </Show>
                   <text fg={theme.textMuted} wrapMode="word">
-                    Estimates include compacted turns and recorded title generation. Input includes cached tokens;
-                    output includes reasoning tokens.
+                    Estimates include compacted turns, recorded titles, and pre-edit summaries for this session. Input
+                    includes cached tokens; output includes reasoning tokens.
                   </text>
                   <Show when={summary().models.some((model) => model.cost === undefined)}>
                     <text fg={theme.warning} wrapMode="word">

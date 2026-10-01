@@ -535,7 +535,7 @@ export const AuxiliaryUsage = Schema.Struct({
   sessionID: SessionID,
   requestID: AuxiliaryRequestID,
   step: NonNegativeInt,
-  purpose: Schema.Literal("title"),
+  purpose: Schema.Literals(["title", "edit-summary"]),
   providerID: Provider.ID,
   modelID: Model.ID,
   status: Schema.Literals(["pending", "complete", "unavailable"]),
