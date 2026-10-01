@@ -30,6 +30,7 @@ export function DialogHelp() {
           Press {commandShortcut()} to see all available actions and commands in any context.
         </text>
         <text fg={theme.textMuted}>/cost — Show session tokens and estimated cost per model (in a session).</text>
+        <text fg={theme.textMuted}>/context - List the files in the agent's context (in a session).</text>
       </box>
       <box flexDirection="row" justifyContent="flex-end" paddingBottom={1}>
         <box paddingLeft={3} paddingRight={3} backgroundColor={theme.primary} onMouseUp={() => dialog.clear()}>
