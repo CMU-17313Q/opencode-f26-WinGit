@@ -661,8 +661,8 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         yield* Effect.forEach(ready, (item) => Deferred.succeed(item.ready, void 0))
       })
 
-      const pull = (hit: Hit) => {
-        const index = list.findIndex((entry) => !entry.match || entry.match(hit))
+      const pull = (hit: Hit, matchedOnly = false) => {
+        const index = list.findIndex((entry) => (entry.match ? entry.match(hit) : !matchedOnly))
         if (index === -1) return
         const first = list[index]
         list = [...list.slice(0, index), ...list.slice(index + 1)]
@@ -676,7 +676,14 @@ export class TestLLMServer extends Context.Service<TestLLMServer, TestLLMServer.
         if (isTitleRequest(body)) {
           hits = [...hits, current]
           yield* notify()
-          const auto: Sse = { type: "sse", head: [role()], tail: [textLine("E2E Title"), finishLine("stop")] }
+          // Explicitly matched responses let title-accounting tests control reported usage.
+          // Ordinary queued replies still belong to the main assistant request.
+          const auto = pull(current, true) ?? {
+            type: "sse" as const,
+            head: [role()],
+            tail: [textLine("E2E Title"), finishLine("stop")],
+          }
+          if (auto.type !== "sse") return fail(auto)
           if (mode === "responses") return send(responses(auto, modelFrom(body)))
           return send(auto)
         }
