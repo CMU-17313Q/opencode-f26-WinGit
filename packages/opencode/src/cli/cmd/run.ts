@@ -254,6 +254,12 @@ export const RunCommand = effectCmd({
         hidden: true,
         default: false,
       })
+      .option("summary", {
+        type: "boolean",
+        default: false,
+        describe:
+          "print a short AI-generated summary of a file before an edit tool applies changes to it (non-attach mode only)",
+      })
       .option("demo", {
         type: "boolean",
         default: false,
@@ -273,6 +279,10 @@ export const RunCommand = effectCmd({
       const interactive = args.mini
       const auto = args.auto || args.yolo || args["dangerously-skip-permissions"]
       const thinking = interactive ? (args.thinking ?? true) : (args.thinking ?? false)
+      if (args.summary && !args.attach) {
+        const { EditSummaryFlag } = await import("@/tool/edit-summary-flag")
+        EditSummaryFlag.set(true)
+      }
       const die = (message: string): never => {
         UI.error(message)
         process.exit(1)
@@ -667,6 +677,22 @@ export const RunCommand = effectCmd({
         return localAgent()
       }
 
+      const editSummaryPrinted = new Set<string>()
+      function printEditSummary(callID: string, rawPath: string, summary: string | undefined) {
+        if (editSummaryPrinted.has(callID)) return
+        editSummaryPrinted.add(callID)
+
+        if (!summary) {
+          UI.println(
+            UI.Style.TEXT_WARNING_BOLD + "!",
+            UI.Style.TEXT_NORMAL + ` could not generate a summary for ${rawPath}`,
+          )
+          return
+        }
+
+        block({ icon: "ℹ", title: `Summary: ${rawPath}` }, summary)
+      }
+
       async function execute(sdk: OpencodeClient) {
         const sess = await session(sdk)
         if (!sess?.id) {
@@ -696,6 +722,11 @@ export const RunCommand = effectCmd({
         // created, and replies issued from inside the loop must use that client.
         async function loop(client: OpencodeClient, events: Awaited<ReturnType<typeof sdk.event.subscribe>>) {
           const toggles = new Map<string, boolean>()
+          // Session IDs of task/subagent children spawned under this run, learned
+          // from the "task" tool's own metadata. An edit inside one of these still
+          // needs its --summary block rendered, even though its message.part.updated
+          // events arrive on a different sessionID than the top-level run.
+          const descendantSessions = new Set<string>()
           let error: string | undefined
 
           for await (const event of events.stream) {
@@ -714,6 +745,27 @@ export const RunCommand = effectCmd({
 
             if (event.type === "message.part.updated") {
               const part = event.properties.part
+
+              if (part.type === "tool" && part.tool === "task" && "metadata" in part.state) {
+                const childSessionID = (part.state.metadata as { sessionId?: string } | undefined)?.sessionId
+                if (childSessionID) descendantSessions.add(childSessionID)
+              }
+
+              if (
+                part.type === "tool" &&
+                part.tool === "edit" &&
+                part.state.status === "running" &&
+                args.summary &&
+                (part.sessionID === sessionID || descendantSessions.has(part.sessionID))
+              ) {
+                const input = part.state.input as { filePath?: string; path?: string }
+                const rawPath = input.filePath ?? input.path
+                const metadata = part.state.metadata as { summary?: string; summaryFailed?: boolean } | undefined
+                if (rawPath && (metadata?.summary || metadata?.summaryFailed)) {
+                  printEditSummary(part.id, rawPath, metadata.summary)
+                }
+              }
+
               if (part.sessionID !== sessionID) continue
 
               if (part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")) {
@@ -796,6 +848,7 @@ export const RunCommand = effectCmd({
             if (event.type === "permission.asked") {
               const permission = event.properties
               if (permission.sessionID !== sessionID) continue
+
 
               if (auto) {
                 await client.permission.reply({
@@ -997,6 +1050,7 @@ export async function runMini(input: MiniCommandInput) {
     port: undefined,
     variant: undefined,
     thinking: undefined,
+    summary: false,
     mini: true,
     interactive: false,
     replay: input.replay ?? true,
