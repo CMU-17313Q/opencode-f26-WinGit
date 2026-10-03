@@ -722,6 +722,11 @@ export const RunCommand = effectCmd({
         // created, and replies issued from inside the loop must use that client.
         async function loop(client: OpencodeClient, events: Awaited<ReturnType<typeof sdk.event.subscribe>>) {
           const toggles = new Map<string, boolean>()
+          // Session IDs of task/subagent children spawned under this run, learned
+          // from the "task" tool's own metadata. An edit inside one of these still
+          // needs its --summary block rendered, even though its message.part.updated
+          // events arrive on a different sessionID than the top-level run.
+          const descendantSessions = new Set<string>()
           let error: string | undefined
 
           for await (const event of events.stream) {
@@ -740,6 +745,27 @@ export const RunCommand = effectCmd({
 
             if (event.type === "message.part.updated") {
               const part = event.properties.part
+
+              if (part.type === "tool" && part.tool === "task" && "metadata" in part.state) {
+                const childSessionID = (part.state.metadata as { sessionId?: string } | undefined)?.sessionId
+                if (childSessionID) descendantSessions.add(childSessionID)
+              }
+
+              if (
+                part.type === "tool" &&
+                part.tool === "edit" &&
+                part.state.status === "running" &&
+                args.summary &&
+                (part.sessionID === sessionID || descendantSessions.has(part.sessionID))
+              ) {
+                const input = part.state.input as { filePath?: string; path?: string }
+                const rawPath = input.filePath ?? input.path
+                const metadata = part.state.metadata as { summary?: string; summaryFailed?: boolean } | undefined
+                if (rawPath && (metadata?.summary || metadata?.summaryFailed)) {
+                  printEditSummary(part.id, rawPath, metadata.summary)
+                }
+              }
+
               if (part.sessionID !== sessionID) continue
 
               if (part.type === "tool" && (part.state.status === "completed" || part.state.status === "error")) {
@@ -761,15 +787,6 @@ export const RunCommand = effectCmd({
                 if (toggles.get(part.id) === true) continue
                 await tool(part)
                 toggles.set(part.id, true)
-              }
-
-              if (part.type === "tool" && part.tool === "edit" && part.state.status === "running" && args.summary) {
-                const input = part.state.input as { filePath?: string; path?: string }
-                const rawPath = input.filePath ?? input.path
-                const metadata = part.state.metadata as { summary?: string; summaryFailed?: boolean } | undefined
-                if (rawPath && (metadata?.summary || metadata?.summaryFailed)) {
-                  printEditSummary(part.id, rawPath, metadata.summary)
-                }
               }
 
               if (part.type === "step-start") {

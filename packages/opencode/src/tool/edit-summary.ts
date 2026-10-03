@@ -2,19 +2,23 @@
 // `opencode run --summary`. Runs a single direct provider call (not the full
 // session/agent turn machinery) so it stays cheap and easy to fail open on.
 import type { Provider } from "@/provider/provider"
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
 import { streamText } from "ai"
 
 const MAX_CONTENT_CHARS = 20_000
+const DEFAULT_TIMEOUT: Duration.Input = "10 seconds"
 
 // `model` is the session's active model. It is preferred over the configured
 // default so the summary uses a provider/credential the user actually chose for
 // this run, rather than whichever provider happens to be the global default.
+// `timeout` is overridable only so a test can exercise cancellation without
+// waiting out the real default.
 export const summarizeFile = (input: {
   provider: Provider.Interface
   model?: Provider.Model
   path: string
   content: string
+  timeout?: Duration.Input
 }) =>
   Effect.gen(function* () {
     const model =
@@ -29,10 +33,11 @@ export const summarizeFile = (input: {
         : input.content
 
     return yield* Effect.tryPromise({
-      try: async () => {
+      try: async (signal) => {
         const result = streamText({
           model: language,
           temperature: 0.3,
+          abortSignal: signal,
           messages: [
             {
               role: "user",
@@ -47,6 +52,6 @@ export const summarizeFile = (input: {
       },
       catch: (error) => error,
     })
-  }).pipe(Effect.timeout("10 seconds"))
+  }).pipe(Effect.timeout(input.timeout ?? DEFAULT_TIMEOUT))
 
 export * as EditSummary from "./edit-summary"
