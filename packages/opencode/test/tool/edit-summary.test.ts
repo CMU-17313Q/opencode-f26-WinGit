@@ -7,6 +7,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { MockLanguageModelV3 } from "ai/test"
 import { EditSummary } from "../../src/tool/edit-summary"
 import { ProviderTest } from "../fake/provider"
 import { Provider } from "@/provider/provider"
@@ -254,3 +255,37 @@ durable.instance("records Copilot's raw billed amount instead of token-based cat
     expect(yield* sessions.messages({ sessionID: chat.id })).toEqual([])
   }),
 )
+
+describe("EditSummary.summarizeFile timeout", () => {
+  test("aborts the underlying provider stream when the timeout fires", async () => {
+    let signal: AbortSignal | undefined
+    const language = new MockLanguageModelV3({
+      doStream: ((options: { abortSignal?: AbortSignal }) => {
+        signal = options.abortSignal
+        // Never resolves on its own — simulates a provider that is still
+        // "in flight" when the Effect-level timeout elapses. A real HTTP
+        // client rejects its pending request once its AbortSignal fires;
+        // this does the same, so the test fails if the signal is never wired.
+        return new Promise(() => {
+          signal?.addEventListener("abort", () => {})
+        })
+      }) as never,
+    })
+    const fake = ProviderTest.fake({ getLanguage: () => Effect.succeed(language) })
+    const provider = await Effect.runPromise(Provider.Service.pipe(Effect.provide(fake.layer)))
+
+    const exit = await Effect.runPromise(
+      EditSummary.summarizeFile({
+        ...input,
+        provider,
+        path: "a.txt",
+        content: "hello",
+        timeout: "30 millis",
+      }).pipe(Effect.provide(Layer.mock(Session.Service, { updateAuxiliaryUsage: () => Effect.void })), Effect.exit),
+    )
+
+    expect(Exit.isFailure(exit)).toBe(true)
+    expect(signal).toBeDefined()
+    expect(signal?.aborted).toBe(true)
+  })
+})

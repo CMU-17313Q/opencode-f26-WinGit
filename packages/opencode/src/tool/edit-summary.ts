@@ -2,13 +2,14 @@
 // `opencode run --summary`. Runs a single direct provider call (not the full
 // session/agent turn machinery) so it stays cheap and easy to fail open on.
 import type { Provider } from "@/provider/provider"
-import { Effect, Stream } from "effect"
+import { Duration, Effect, Stream } from "effect"
 import { streamText } from "ai"
 import { LLMAISDK } from "@/session/llm/ai-sdk"
 import { SessionAuxiliaryUsage } from "@/session/auxiliary-usage"
 import type { SessionID } from "@/session/schema"
 
 const MAX_CONTENT_CHARS = 20_000
+const DEFAULT_TIMEOUT: Duration.Input = "10 seconds"
 
 // `model` is the session's active model. It is preferred over the configured
 // default so the summary uses a provider/credential the user actually chose for
@@ -20,6 +21,7 @@ export const summarizeFile = (input: {
   abort: AbortSignal
   path: string
   content: string
+  timeout?: Duration.Input
 }) =>
   Effect.gen(function* () {
     if (input.abort.aborted) return yield* Effect.interrupt
@@ -67,7 +69,7 @@ export const summarizeFile = (input: {
     if (input.abort.aborted) return yield* Effect.interrupt
     return text.trim()
   }).pipe(
-    Effect.timeout("10 seconds"),
+    Effect.timeout(input.timeout ?? DEFAULT_TIMEOUT),
     Effect.raceFirst(
       Effect.callback<never>((resume) => {
         const cancel = () => resume(Effect.interrupt)
