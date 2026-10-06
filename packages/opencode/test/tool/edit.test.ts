@@ -15,6 +15,8 @@ import { SessionID, MessageID } from "../../src/session/schema"
 import * as Tool from "../../src/tool/tool"
 import { testEffect } from "../lib/effect"
 import { Watcher } from "@opencode-ai/core/filesystem/watcher"
+import { Provider } from "@/provider/provider"
+import { ProviderTest } from "../fake/provider"
 
 const ctx = {
   sessionID: SessionID.make("ses_test-edit-session"),
@@ -31,8 +33,10 @@ afterEach(async () => {
   await disposeAllInstances()
 })
 
+const provider = ProviderTest.fake()
 const layer = LayerNode.compile(
-  LayerNode.group([LSP.node, FSUtil.node, Format.node, EventV2Bridge.node, Truncate.node, Agent.node]),
+  LayerNode.group([LSP.node, FSUtil.node, Format.node, EventV2Bridge.node, Truncate.node, Agent.node, Provider.node]),
+  [[Provider.node, provider.layer]],
 )
 
 const it = testEffect(layer)
