@@ -218,13 +218,136 @@ These retain the feature author's original child-session and pending-provider ti
 
 ## Context window meter
 
-Feature: [Issue #5](https://github.com/CMU-17313Q/opencode-f26-WinGit/issues/5), [PR #9](https://github.com/CMU-17313Q/opencode-f26-WinGit/pull/9).
+**Added by:** malaliQA (PR #9, closes #5)
 
-Start a TUI session with `bun dev .`. The status bar under the prompt shows used tokens, the selected model's context-window limit and a rounded percentage. It turns yellow when that displayed percentage reaches 80%. The latest assistant response with output usage supplies input, output, reasoning and cached tokens. Earlier responses are not summed because each request includes the conversation again. A response without output usage keeps the previous value; an empty session starts at zero.
+### What it does
 
-To check it, send a short prompt, switch to a model with a different context limit, then use `/compact`. The status bar and Context sidebar percentages should recalculate immediately and agree on the model switch. Usage may fall after compaction. An unknown context limit cannot produce a meaningful percentage. This meter describes conversation context; the USD estimate separately includes recorded title and summary calls.
+While a session is open, the status bar under the prompt box (bottom right, next
+to `ctrl+p commands`) shows how much of the selected model's context window the
+conversation is using, as `used / total (xx%)`, for example `47.7K / 1.0M (5%)`.
+When the usage reaches 80% or more, the text turns yellow as a warning. The
+session's cost estimate is shown after it, separated by `·`. The sidebar's Context
+panel uses the same calculation, so its percentage matches the status bar.
 
-From `packages/tui`, run `bun test test/util/context-usage.test.ts test/session-cost-app.test.tsx` and `bun typecheck`. The helper tests cover the latest response, missing usage, compaction, cached tokens, model limits and the warning threshold. The application test uses the model picker to switch between 10,000-token and 200-token windows and checks matching status bar/sidebar percentages, unchanged cost and one history load per session.
+How the number is worked out:
+
+- **Used** is the token count of the latest assistant reply (input, output,
+  reasoning and cached tokens added together). Earlier replies are not added up,
+  because every request sends the whole conversation again, so the latest reply
+  already includes everything before it.
+- **Total** is the context window of the model that is currently selected, so the
+  percentage changes as soon as you switch models.
+- A reply that comes back without usage data (for example a failed request) is
+  skipped, so the meter keeps showing the last known value instead of dropping to
+  zero.
+- After `/compact` the conversation gets shorter, so the number goes down on the
+  next reply instead of continuing to climb.
+- A new session shows `0 / <window> (0%)`. If a model's window size is unknown,
+  only the token count is shown, with no percentage.
+
+This meter describes conversation context only. The USD estimate separately
+includes recorded title and summary calls.
+
+### How to use it
+
+1. Make sure a provider is connected (`/connect` in the TUI). Some of the free
+   models listed under OpenCode Zen work without an API key.
+2. From the repository root, start the TUI:
+
+   ```bash
+   bun dev
+   ```
+
+3. Send a prompt. Look at the bottom right of the status bar. It should read
+   `0 / <window> (0%)` before the reply and update by itself when the reply
+   finishes, with no manual refresh.
+
+### How to test it manually
+
+- **Updates after every reply.** Send a few prompts. The used count should grow
+  after each reply and match the number in the sidebar's Context panel.
+- **Model switch.** Open `/models` and pick a model with a different window size.
+  The total and the percentage change immediately in both the status bar and the
+  sidebar, before you send anything. The token count stays the same.
+- **Compaction.** After a few replies, run `/compact`, then send another prompt.
+  The number should drop below the value you saw before compacting.
+- **Missing usage data.** Switch to a model that fails (for example one with a bad
+  key) and send a prompt. The error appears, but the meter keeps the previous
+  value and nothing crashes.
+- **Yellow warning without waiting for 80%.** Give a model a small window in your
+  global opencode config so that one reply already passes 80%. First list the
+  model IDs of a provider:
+
+  ```bash
+  bun dev models opencode
+  ```
+
+  Then add an override to your global config (`~/.config/opencode/opencode.jsonc`,
+  on Windows `C:\Users\<you>\.config\opencode\opencode.jsonc`). Replace
+  `opencode` with your provider id and `<model-id>` with an ID from the list above:
+
+  ```jsonc
+  {
+    "$schema": "https://opencode.ai/config.json",
+    "provider": {
+      "opencode": {
+        "models": {
+          "<model-id>": { "limit": { "context": 15000, "output": 4000 } }
+        }
+      }
+    }
+  }
+  ```
+
+  Restart `bun dev`, select that model and send one prompt. A first reply used
+  about 12K tokens in our testing, so the meter should show about 80% and turn
+  yellow. Remove the override when you are done. The same trick with a window of
+  around 100000 lets a free model reach 50% in a few prompts.
+
+### Automated tests
+
+The calculation lives in one function, `contextUsage(messages, limit)` in
+[`packages/tui/src/util/context-usage.ts`](packages/tui/src/util/context-usage.ts),
+so it can be tested without rendering the TUI. Run the tests and the type check
+from `packages/tui`:
+
+```bash
+cd packages/tui
+bun test test/util/context-usage.test.ts test/session-cost-app.test.tsx
+bun run typecheck
+```
+
+The 10 unit tests are in
+[`packages/tui/test/util/context-usage.test.ts`](packages/tui/test/util/context-usage.test.ts):
+
+| Test | What it checks | Why it is there |
+| --- | --- | --- |
+| uses the last assistant message against the limit | 40K input plus 10K output on a 200K window gives 50K used and 25% | The basic calculation is right |
+| returns undefined for a session with no messages | An empty message list gives no usage | A brand new session does not crash |
+| returns undefined when only user messages exist | No assistant reply yet gives no usage | The meter waits for the first reply instead of guessing |
+| counts only the last assistant message, not a sum | Replies of 11K and 32K give 32K, not 43K | Guards against double counting the re-sent conversation |
+| falls back to the last known value when the latest response has no usage | A reply with zero tokens keeps the earlier value | Failed or incomplete replies do not reset the meter |
+| drops after compaction instead of continuing to climb | 155K followed by 21K gives 21K (11%) | The meter follows the real context size down |
+| includes cached tokens in the total | Cached tokens are added to the used count | Cached text still takes up space in the window |
+| recomputes the percentage for a model with a different window | The same 100K is 50% of 200K and 10% of 1M | Switching models gives a correct percentage |
+| warns at 80% and above | 79% does not warn; 80% and 96% do | The warning starts exactly at the threshold |
+| reports usage without a percentage when the model limit is unknown | No limit gives the count only, with no percentage and no warning | A model missing from the config does not crash |
+
+The integration test
+[`packages/tui/test/session-cost-app.test.tsx`](packages/tui/test/session-cost-app.test.tsx)
+renders the real application and switches models through the model picker between
+a 10,000-token and a 200-token window. It checks that the status bar and the
+sidebar both show the matching percentage (1% and then 60%) and that they return
+to the original value when the first model is selected again.
+
+**Why this is sufficient coverage:** every branch of the calculation is covered by
+the unit tests, including the edge cases from the issue's testing notes
+(compaction, missing usage, two models with different windows). The integration
+test covers the part that depends on the running TUI: the percentage in the
+status bar and the sidebar follows the selected model. What the automated tests do
+not cover is the yellow colour and the live update after every real reply. We
+checked those by hand in a running TUI using the steps above, and the screenshots
+are attached to PR #9.
 
 ## Protected branch warning
 
