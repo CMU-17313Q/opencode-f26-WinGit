@@ -608,4 +608,29 @@ EOF`
       }),
     { git: true },
   )
+
+  it.instance(
+    "does not ask for protected branch confirmation when applying a patch on a feature branch",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* Effect.promise(() => $`git branch -M feature/test`.cwd(test.directory).quiet())
+
+        const target = path.join(test.directory, "feature-patch.txt")
+        yield* writeText(target, "old content\n")
+
+        const { ctx, permissionCalls } = makeCtx()
+
+        const patchText =
+          "*** Begin Patch\n*** Update File: feature-patch.txt\n@@\n-old content\n+new content\n*** End Patch"
+
+        yield* execute({ patchText }, ctx)
+
+        const request = permissionCalls.find((item) => item.permission === "protected_branch")
+
+        expect(request).toBeUndefined()
+        expect(yield* readText(target)).toBe("new content\n")
+      }),
+    { git: true },
+  )
 })
