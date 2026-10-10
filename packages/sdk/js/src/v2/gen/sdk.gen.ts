@@ -177,10 +177,14 @@ import type {
   QuestionV2Reply,
   SessionAbortErrors,
   SessionAbortResponses,
+  SessionAuxiliaryUsageErrors,
+  SessionAuxiliaryUsageResponses,
   SessionChildrenErrors,
   SessionChildrenResponses,
   SessionCommandErrors,
   SessionCommandResponses,
+  SessionContextFilesErrors,
+  SessionContextFilesResponses,
   SessionCreateErrors,
   SessionCreateResponses,
   SessionDeleteErrors,
@@ -3597,6 +3601,74 @@ export class Session2 extends HeyApiClient {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get retained file-tool context
+   *
+   * List file-tool text retained after conversation compaction and output pruning. Counts are approximate and exclude system instructions, media, and runtime plugin transformations.
+   */
+  public contextFiles<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionContextFilesResponses, SessionContextFilesErrors, ThrowOnError>({
+      url: "/session/{sessionID}/context_files",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get auxiliary model usage
+   *
+   * Retrieve separately recorded model usage for session tasks such as title generation.
+   */
+  public auxiliaryUsage<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      SessionAuxiliaryUsageResponses,
+      SessionAuxiliaryUsageErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/auxiliary_usage",
+      ...options,
+      ...params,
     })
   }
 

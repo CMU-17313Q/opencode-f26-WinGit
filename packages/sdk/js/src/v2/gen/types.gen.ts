@@ -16,6 +16,7 @@ export type Event =
   | EventMessageRemoved
   | EventMessagePartUpdated
   | EventMessagePartRemoved
+  | EventSessionAuxiliaryUsageUpdated
   | EventSessionNextAgentSwitched
   | EventSessionNextModelSwitched
   | EventSessionNextMoved
@@ -638,6 +639,32 @@ export type Part =
   | RetryPart
   | CompactionPart
 
+export type AuxiliaryUsage = {
+  id: string
+  sessionID: string
+  requestID: string
+  step: number
+  purpose: "title" | "edit-summary"
+  providerID: string
+  modelID: string
+  status: "pending" | "complete" | "unavailable"
+  cost?: number
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+    total?: number
+  }
+  time: {
+    created: number
+    updated: number
+  }
+}
+
 export type Prompt = {
   text: string
   files?: Array<PromptFileAttachment>
@@ -816,6 +843,14 @@ export type GlobalEvent = {
           sessionID: string
           messageID: string
           partID: string
+        }
+      }
+    | {
+        id: string
+        type: "session.auxiliary_usage.updated"
+        properties: {
+          sessionID: string
+          usage: AuxiliaryUsage
         }
       }
     | {
@@ -1608,6 +1643,7 @@ export type GlobalEvent = {
     | SyncEventMessageRemoved
     | SyncEventMessagePartUpdated
     | SyncEventMessagePartRemoved
+    | SyncEventSessionAuxiliaryUsageUpdated
     | SyncEventSessionNextAgentSwitched
     | SyncEventSessionNextModelSwitched
     | SyncEventSessionNextMoved
@@ -1912,6 +1948,7 @@ export type Config = {
     ignore?: Array<string>
   }
   snapshot?: boolean
+  protected_branches?: Array<string>
   plugin?: Array<
     | string
     | [
@@ -2864,6 +2901,7 @@ export type V2Event =
   | MessageRemoved
   | MessagePartUpdated
   | MessagePartRemoved
+  | SessionAuxiliaryUsageUpdated
   | SessionNextAgentSwitched
   | SessionNextModelSwitched
   | SessionNextMoved
@@ -3294,6 +3332,21 @@ export type SyncEventMessagePartRemoved = {
       sessionID: string
       messageID: string
       partID: string
+    }
+  }
+}
+
+export type SyncEventSessionAuxiliaryUsageUpdated = {
+  type: "sync"
+  id: string
+  syncEvent: {
+    type: "session.auxiliary_usage.updated.1"
+    id: string
+    seq: number
+    aggregateID: string
+    data: {
+      sessionID: string
+      usage: AuxiliaryUsage
     }
   }
 }
@@ -5217,6 +5270,24 @@ export type MessagePartRemoved = {
   }
 }
 
+export type SessionAuxiliaryUsageUpdated = {
+  id: string
+  metadata?: {
+    [key: string]: unknown
+  }
+  type: "session.auxiliary_usage.updated"
+  durable?: {
+    aggregateID: string
+    seq: number
+    version: number
+  }
+  location?: LocationRef
+  data: {
+    sessionID: string
+    usage: AuxiliaryUsage
+  }
+}
+
 export type SessionNextTextDelta = {
   id: string
   metadata?: {
@@ -6245,6 +6316,15 @@ export type EventMessagePartRemoved = {
     sessionID: string
     messageID: string
     partID: string
+  }
+}
+
+export type EventSessionAuxiliaryUsageUpdated = {
+  id: string
+  type: "session.auxiliary_usage.updated"
+  properties: {
+    sessionID: string
+    usage: AuxiliaryUsage
   }
 }
 
@@ -9652,6 +9732,77 @@ export type SessionUpdateResponses = {
 }
 
 export type SessionUpdateResponse = SessionUpdateResponses[keyof SessionUpdateResponses]
+
+export type SessionContextFilesData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/context_files"
+}
+
+export type SessionContextFilesErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionContextFilesError = SessionContextFilesErrors[keyof SessionContextFilesErrors]
+
+export type SessionContextFilesResponses = {
+  /**
+   * Retained file-tool text and approximate token contributions
+   */
+  200: Array<{
+    path: string
+    tokens: number
+  }>
+}
+
+export type SessionContextFilesResponse = SessionContextFilesResponses[keyof SessionContextFilesResponses]
+
+export type SessionAuxiliaryUsageData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/auxiliary_usage"
+}
+
+export type SessionAuxiliaryUsageErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionAuxiliaryUsageError = SessionAuxiliaryUsageErrors[keyof SessionAuxiliaryUsageErrors]
+
+export type SessionAuxiliaryUsageResponses = {
+  /**
+   * Auxiliary model usage
+   */
+  200: Array<AuxiliaryUsage>
+}
+
+export type SessionAuxiliaryUsageResponse = SessionAuxiliaryUsageResponses[keyof SessionAuxiliaryUsageResponses]
 
 export type SessionChildrenData = {
   body?: never

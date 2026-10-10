@@ -24,6 +24,8 @@ import { useSDK } from "../../context/sdk"
 import { useRoute } from "../../context/route"
 import { useProject } from "../../context/project"
 import { useSync } from "../../context/sync"
+import { useSessionCost } from "../../context/session-cost"
+import { formatCost } from "../../util/session-cost"
 import { useEvent } from "../../context/event"
 import { editorSelectionKey, useEditorContext, type EditorSelection } from "../../context/editor"
 import { normalizePromptContent, openEditor } from "../../editor"
@@ -96,11 +98,6 @@ export type PromptRef = {
   focus(): void
   submit(): void
 }
-
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-})
 
 const DRAFT_RETENTION_MIN_CHARS = 20
 
@@ -262,9 +259,9 @@ export function Prompt(props: PromptProps) {
     return messages.findLast((m): m is UserMessage => m.role === "user")
   })
 
+  const sessionCost = useSessionCost(() => props.sessionID)
   const usage = createMemo(() => {
     if (!props.sessionID) return
-    const session = sync.session.get(props.sessionID)
     const selected = local.model.current()
     const limit = selected
       ? sync.data.provider.find((item) => item.id === selected.providerID)?.models[selected.modelID]?.limit.context
@@ -275,13 +272,12 @@ export function Prompt(props: PromptProps) {
       percent: limit ? 0 : undefined,
       warn: false,
     }
-    const cost = session?.cost ?? 0
     return {
       context:
         context.total !== undefined
           ? `${Locale.number(context.used)} / ${Locale.number(context.total)} (${context.percent}%)`
           : Locale.number(context.used),
-      cost: cost > 0 ? money.format(cost) : undefined,
+      cost: sessionCost.loading() ? "cost …" : `${formatCost(sessionCost.summary()?.total)} est.`,
       warn: context.warn,
     }
   })

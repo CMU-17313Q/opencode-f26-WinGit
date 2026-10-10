@@ -6,6 +6,8 @@ describe("legacy event schema compatibility", () => {
   test("Core references canonical SessionV1 definitions", () => {
     expect(SessionV1.Event.Created).toBe(Wire.Event.Created)
     expect(SessionV1.Event.PartUpdated).toBe(Wire.Event.PartUpdated)
+    expect(SessionV1.AuxiliaryUsage).toBe(Wire.AuxiliaryUsage)
+    expect(SessionV1.Event.AuxiliaryUsageUpdated).toBe(Wire.Event.AuxiliaryUsageUpdated)
   })
 
   test("Core retains NamedError constructor identity", () => {

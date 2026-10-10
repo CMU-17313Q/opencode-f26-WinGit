@@ -3,6 +3,7 @@
 // general pattern this mirrors.
 import { describe, expect } from "bun:test"
 import { Effect } from "effect"
+import type { Event } from "@opencode-ai/sdk/v2"
 import path from "path"
 import { reply } from "../../lib/llm-server"
 import { cliIt } from "../../lib/cli-process"
@@ -72,10 +73,11 @@ describe("opencode run --summary", () => {
         // The AI SDK retries a 5xx a few times before giving up — queue enough
         // failures that every retry attempt (not just the first) fails too.
         const summaryFailure = () =>
-          llm.pushMatch(
-            (hit) => JSON.stringify(hit.body).includes(SUMMARY_MARKER),
-            { type: "http-error", status: 500, body: { error: "simulated summary failure" } },
-          )
+          llm.pushMatch((hit) => JSON.stringify(hit.body).includes(SUMMARY_MARKER), {
+            type: "http-error",
+            status: 500,
+            body: { error: "simulated summary failure" },
+          })
         yield* summaryFailure()
         yield* summaryFailure()
         yield* summaryFailure()
@@ -95,6 +97,297 @@ describe("opencode run --summary", () => {
       }),
     60_000,
   )
+
+  for (const failed of [false, true]) {
+    cliIt.live(
+      `shows a subagent's ${failed ? "summary warning" : "summary"} while keeping its ordinary output private`,
+      ({ llm, opencode, home }) =>
+        Effect.gen(function* () {
+          yield* Effect.promise(() => Bun.write(path.join(home, "child.txt"), "original child content"))
+          yield* llm.push(
+            reply().tool("task", {
+              description: "Edit the child note",
+              prompt: "Edit child.txt",
+              subagent_type: "general",
+            }),
+            reply().tool("edit", {
+              filePath: "child.txt",
+              oldString: "original child content",
+              newString: "updated child content",
+            }),
+          )
+          yield* llm.pushMatch(
+            (hit) => JSON.stringify(hit.body).includes(SUMMARY_MARKER),
+            failed
+              ? { type: "http-error", status: 400, body: { error: "summary unavailable" } }
+              : reply().text("CHILD_SUMMARY_MARKER describes the original child note.").stop(),
+          )
+          yield* llm.text("PRIVATE_CHILD_REPLY")
+          yield* llm.text("root finished")
+
+          const result = yield* opencode.run("delegate this edit", {
+            extraArgs: ["--summary", "--dangerously-skip-permissions", "--title", "Child summary test", "--dir", home],
+          })
+          opencode.expectExit(result, 0)
+          const marker = failed ? "could not generate a summary" : "CHILD_SUMMARY_MARKER"
+          expect(result.stderr.split(marker)).toHaveLength(2)
+          expect(result.stdout).toBe("root finished\n")
+          expect(result.stderr).not.toContain("PRIVATE_CHILD_REPLY")
+          expect(result.stderr).not.toContain("Edit child.txt")
+          const hits = yield* llm.hits
+          const summaryHit = hits.find((hit) => JSON.stringify(hit.body).includes(SUMMARY_MARKER))
+          expect(JSON.stringify(summaryHit?.body)).toContain("original child content")
+          expect(JSON.stringify(summaryHit?.body)).not.toContain("updated child content")
+          expect(yield* Effect.promise(() => Bun.file(path.join(home, "child.txt")).text())).toBe(
+            "updated child content",
+          )
+        }),
+      60_000,
+    )
+  }
+
+  for (const format of ["default", "json"] as const) {
+    cliIt.live(
+      `replays nested summaries once without leaking unrelated sessions in ${format} output`,
+      ({ opencode, home }) =>
+        Effect.gen(function* () {
+          const tool = (
+            sessionID: string,
+            id: string,
+            name: string,
+            metadata: Record<string, unknown>,
+            input: Record<string, unknown>,
+          ): Event => ({
+            id: `event-${sessionID}-${id}`,
+            type: "message.part.updated",
+            properties: {
+              sessionID,
+              time: 1,
+              part: {
+                id,
+                sessionID,
+                messageID: `message-${sessionID}`,
+                type: "tool",
+                callID: id,
+                tool: name,
+                state: { status: "running", input, metadata, time: { start: 1 } },
+              },
+            },
+          })
+          const child = tool(
+            "child",
+            "shared-edit-id",
+            "edit",
+            { summary: "FIRST_LEVEL_SUMMARY" },
+            { filePath: "child.txt" },
+          )
+          const warning = tool(
+            "grandchild",
+            "failed-edit",
+            "edit",
+            { summaryFailed: true },
+            { filePath: "warning.txt" },
+          )
+          const text = (sessionID: string, value: string): Event => ({
+            id: `event-text-${sessionID}`,
+            type: "message.part.updated",
+            properties: {
+              sessionID,
+              time: 2,
+              part: {
+                id: `text-${sessionID}`,
+                sessionID,
+                messageID: `message-${sessionID}`,
+                type: "text",
+                text: value,
+                time: { start: 1, end: 2 },
+              },
+            },
+          })
+          const permission = (sessionID: string, id: string, name = "protected_branch"): Event => ({
+            id: `event-${id}`,
+            type: "permission.asked",
+            properties: { id, sessionID, permission: name, patterns: ["main"], always: [], metadata: {} },
+          })
+          const events: Event[] = [
+            tool(
+              "unrelated",
+              "unrelated-task",
+              "task",
+              { sessionId: "unrelated-child" },
+              { description: "Unrelated task", subagent_type: "general" },
+            ),
+            permission("unrelated-child", "unrelated-protected"),
+            tool(
+              "unrelated-child",
+              "private-edit",
+              "edit",
+              { summary: "UNRELATED_SUMMARY" },
+              { filePath: "private.txt" },
+            ),
+            tool(
+              "root",
+              "root-task",
+              "task",
+              { sessionId: "child" },
+              { description: "Root task", subagent_type: "general" },
+            ),
+            tool(
+              "child",
+              "child-task",
+              "task",
+              { sessionId: "grandchild" },
+              { description: "Nested task", subagent_type: "general" },
+            ),
+            permission("child", "child-protected"),
+            permission("grandchild", "grandchild-protected"),
+            permission("child", "child-bash", "bash"),
+            child,
+            child,
+            tool(
+              "grandchild",
+              "shared-edit-id",
+              "edit",
+              { summary: "NESTED_REPLAY_SUMMARY" },
+              { filePath: "grandchild.txt" },
+            ),
+            warning,
+            warning,
+            text("child", "PRIVATE_CHILD_TEXT"),
+            text("unrelated", "UNRELATED_TEXT"),
+            {
+              id: "event-child-idle",
+              type: "session.status",
+              properties: { sessionID: "child", status: { type: "idle" } },
+            },
+            tool("root", "root-edit", "edit", { summary: "ROOT_REPLAY_SUMMARY" }, { filePath: "root.txt" }),
+            {
+              id: "event-root-edit-complete",
+              type: "message.part.updated",
+              properties: {
+                sessionID: "root",
+                time: 2,
+                part: {
+                  id: "root-edit",
+                  sessionID: "root",
+                  messageID: "message-root",
+                  type: "tool",
+                  callID: "root-edit",
+                  tool: "edit",
+                  state: {
+                    status: "completed",
+                    input: { filePath: "root.txt" },
+                    metadata: {},
+                    title: "root.txt",
+                    output: "Edit applied successfully.",
+                    time: { start: 1, end: 2 },
+                  },
+                },
+              },
+            },
+            text("root", "ROOT_FINAL"),
+            {
+              id: "event-permission",
+              type: "permission.asked",
+              properties: {
+                id: "replay-permission",
+                sessionID: "root",
+                permission: "edit",
+                patterns: ["root.txt"],
+                always: [],
+                metadata: {},
+              },
+            },
+            {
+              id: "event-root-idle",
+              type: "session.status",
+              properties: { sessionID: "root", status: { type: "idle" } },
+            },
+          ]
+          const consumed = Promise.withResolvers<void>()
+          const replies: { id: string; reply: string }[] = []
+          // Replay server events through the real CLI transport, including events
+          // a live single-run fixture cannot naturally produce (duplicates and strangers).
+          const server = yield* Effect.acquireRelease(
+            Effect.sync(() =>
+              Bun.serve({
+                hostname: "127.0.0.1",
+                port: 0,
+                async fetch(request) {
+                  const url = new URL(request.url)
+                  if (url.pathname === "/session/root" && request.method === "GET") {
+                    return Response.json({ id: "root", title: "Replay", directory: home })
+                  }
+                  if (url.pathname === "/config") return Response.json({})
+                  if (url.pathname === "/event") {
+                    return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+                      headers: { "content-type": "text/event-stream" },
+                    })
+                  }
+                  if (url.pathname.startsWith("/permission/") && url.pathname.endsWith("/reply")) {
+                    const id = url.pathname.split("/")[2]
+                    replies.push({ id, reply: (await request.json()).reply })
+                    if (id === "replay-permission") consumed.resolve()
+                    return Response.json(true)
+                  }
+                  if (url.pathname === "/session/root/message" && request.method === "POST") {
+                    // Attach mode does not await its output loop. A permission
+                    // reply acknowledges that all preceding replay events were consumed.
+                    await consumed.promise
+                    return Response.json({})
+                  }
+                  return new Response(`Unexpected request: ${request.method} ${url.pathname}`, { status: 404 })
+                },
+              }),
+            ),
+            (server) =>
+              Effect.promise(async () => {
+                await server.stop(true)
+              }),
+          )
+          const result = yield* opencode.run("replay", {
+            format,
+            extraArgs: [
+              "--summary",
+              "--dangerously-skip-permissions",
+              "--attach",
+              server.url.toString(),
+              "--session",
+              "root",
+              "--dir",
+              home,
+            ],
+          })
+          opencode.expectExit(result, 0)
+          expect(replies).toEqual([
+            { id: "child-protected", reply: "once" },
+            { id: "grandchild-protected", reply: "once" },
+            { id: "replay-permission", reply: "once" },
+          ])
+          for (const marker of [
+            "FIRST_LEVEL_SUMMARY",
+            "NESTED_REPLAY_SUMMARY",
+            "ROOT_REPLAY_SUMMARY",
+            "could not generate a summary for warning.txt",
+          ]) {
+            expect(result.stderr.split(marker)).toHaveLength(2)
+          }
+          for (const marker of ["UNRELATED_SUMMARY", "UNRELATED_TEXT", "PRIVATE_CHILD_TEXT", "Nested task"]) {
+            expect(result.stdout + result.stderr).not.toContain(marker)
+          }
+          if (format === "default") {
+            expect(result.stdout).toBe("ROOT_FINAL\n")
+            const editIndex = result.stderr.indexOf("Edit root.txt")
+            expect(editIndex).toBeGreaterThan(result.stderr.indexOf("ROOT_REPLAY_SUMMARY"))
+          } else {
+            const output = opencode.parseJsonEvents(result.stdout)
+            expect(output.map((event) => event.type)).toEqual(["tool_use", "text"])
+            expect(output.every((event) => event.sessionID === "root")).toBe(true)
+          }
+        }),
+      60_000,
+    )
+  }
 
   // Regression: child-session (task/subagent) events arrive on a different
   // sessionID than the top-level run, and used to be filtered out before the

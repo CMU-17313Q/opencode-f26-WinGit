@@ -1,4 +1,4 @@
-import { SessionID, MessageID } from "./schema"
+import { SessionID, MessageID, PartID } from "./schema"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import {
@@ -50,6 +50,53 @@ function truncateToolOutput(text: string, maxChars?: number) {
   if (!maxChars || text.length <= maxChars) return text
   const omitted = text.length - maxChars
   return `${text.slice(0, maxChars)}\n[Tool output truncated for compaction: omitted ${omitted} chars]`
+}
+
+function replayAssistant(message: WithParts) {
+  return (
+    message.info.role === "assistant" &&
+    (!message.info.error ||
+      (AbortedError.isInstance(message.info.error) &&
+        message.parts.some((part) => part.type !== "step-start" && part.type !== "reasoning")))
+  )
+}
+
+function retainedToolOutput(part: SessionV1.ToolPart) {
+  if (part.state.status === "completed") return part.state.time.compacted ? undefined : part.state.output
+  if (part.state.status !== "error" || part.state.metadata?.interrupted !== true) return
+  const output = part.state.metadata.output
+  return typeof output === "string" ? output : undefined
+}
+
+/** Text carried by file tools in retained conversation history, not a complete model-input inventory. */
+export function contextFiles(messages: readonly WithParts[]) {
+  const files = new Map<string, number>()
+  // Compaction moves its summary ahead of the retained tail. Display first
+  // appearance chronologically without mutating the model's replay ordering.
+  for (const message of messages.toSorted((a, b) => (isAfter(a.info, b.info) ? 1 : isAfter(b.info, a.info) ? -1 : 0))) {
+    if (!replayAssistant(message)) continue
+    for (const part of message.parts) {
+      if (part.type !== "tool") continue
+      const path = part.state.input.filePath
+      if (typeof path !== "string" || !path) continue
+      const content = fileToolText(part)
+      if (content === undefined) continue
+      files.set(path, (files.get(path) ?? 0) + content.length)
+    }
+  }
+  return Array.from(files, ([path, length]) => ({ path, tokens: Math.ceil(length / 4) }))
+}
+
+function fileToolText(part: SessionV1.ToolPart) {
+  if (part.tool === "read") return retainedToolOutput(part)
+  // Inputs survive output pruning, including failed/interrupted tool calls.
+  // Listing their text does not imply the edit or write succeeded.
+  if (part.tool === "write") return typeof part.state.input.content === "string" ? part.state.input.content : undefined
+  if (part.tool !== "edit") return
+  const old = part.state.input.oldString
+  const next = part.state.input.newString
+  if (typeof old !== "string" && typeof next !== "string") return
+  return (typeof old === "string" ? old : "") + (typeof next === "string" ? next : "")
 }
 
 export const Event = {
@@ -245,15 +292,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       const differentModel = `${model.providerID}/${model.id}` !== `${msg.info.providerID}/${msg.info.modelID}`
       const media: Array<{ mime: string; url: string; filename?: string }> = []
 
-      if (
-        msg.info.error &&
-        !(
-          AbortedError.isInstance(msg.info.error) &&
-          msg.parts.some((part) => part.type !== "step-start" && part.type !== "reasoning")
-        )
-      ) {
-        continue
-      }
+      if (!replayAssistant(msg)) continue
       const assistantMessage: UIMessage = {
         id: msg.info.id,
         role: "assistant",
@@ -290,9 +329,11 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
         if (part.type === "tool") {
           toolNames.add(part.tool)
           if (part.state.status === "completed") {
-            const outputText = part.state.time.compacted
-              ? "[Old tool result content cleared]"
-              : truncateToolOutput(part.state.output, options?.toolOutputMaxChars)
+            const retained = retainedToolOutput(part)
+            const outputText =
+              retained === undefined
+                ? "[Old tool result content cleared]"
+                : truncateToolOutput(retained, options?.toolOutputMaxChars)
             const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
 
             // For providers that don't support media in tool results, extract media files
@@ -323,7 +364,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
             })
           }
           if (part.state.status === "error") {
-            const output = part.state.metadata?.interrupted === true ? part.state.metadata.output : undefined
+            const output = retainedToolOutput(part)
             if (typeof output === "string") {
               assistantMessage.parts.push({
                 type: ("tool-" + part.tool) as `tool-${string}`,
@@ -571,8 +612,25 @@ export function filterCompacted(msgs: Iterable<WithParts>) {
   return result
 }
 
-export const filterCompactedEffect = Effect.fnUntraced(function* (sessionID: SessionID) {
-  return filterCompacted(yield* stream(sessionID))
+function filterReverted(msgs: WithParts[], revert?: { messageID: MessageID; partID?: PartID }) {
+  if (!revert) return msgs
+  // Match SessionRevert.cleanup on this newest-first stream without deleting
+  // the stored messages or parts, so /redo can still restore them.
+  const index = msgs.findIndex((msg) => msg.info.id === revert.messageID)
+  const target = msgs[index]
+  if (!target) return msgs
+  if (!revert.partID) return msgs.slice(index + 1)
+  const part = target.parts.findIndex((part) => part.id === revert.partID)
+  if (part < 0) return msgs.slice(index)
+  return [{ ...target, parts: target.parts.slice(0, part) }, ...msgs.slice(index + 1)]
+}
+
+export const filterCompactedEffect = Effect.fnUntraced(function* (
+  sessionID: SessionID,
+  revert?: { messageID: MessageID; partID?: PartID },
+) {
+  // Apply undo before compaction: a reverted summary must not hide older text.
+  return filterCompacted(filterReverted(yield* stream(sessionID), revert))
 })
 
 // filterCompacted reorders messages for model consumption

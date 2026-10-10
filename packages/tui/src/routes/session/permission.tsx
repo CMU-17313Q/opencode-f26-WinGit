@@ -1,6 +1,6 @@
 import { createStore } from "solid-js/store"
 import { dirname } from "node:path"
-import { createMemo, For, Match, Show, Switch } from "solid-js"
+import { createEffect, createMemo, For, Match, on, Show, Switch } from "solid-js"
 import { Portal, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import type { TextareaRenderable } from "@opentui/core"
 import { useTheme, selectedForeground } from "../../context/theme"
@@ -116,6 +116,18 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
     stage: "permission" as PermissionStage,
   })
   const pathFormatter = usePathFormatter()
+  createEffect(
+    on(
+      () => props.request.id,
+      () => setStore("stage", "permission"),
+    ),
+  )
+  const options = createMemo(
+    (): Record<string, string> =>
+      props.request.always.length > 0
+        ? { once: "Allow once", always: "Allow always", reject: "Reject" }
+        : { once: "Allow once", reject: "Reject" },
+  )
 
   const session = createMemo(() => sync.data.session.find((s) => s.id === props.request.sessionID))
 
@@ -164,7 +176,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
           escapeKey="cancel"
           onSelect={(option) => {
             setStore("stage", "permission")
-            if (option === "cancel") return
+            if (option === "cancel" || props.request.always.length === 0) return
             void sdk.client.permission.reply({
               reply: "always",
               requestID: props.request.id,
@@ -329,6 +341,23 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               }
             }
 
+            if (permission === "protected_branch") {
+              const meta = props.request.metadata ?? {}
+              const branch = typeof meta["branch"] === "string" ? meta["branch"] : (props.request.patterns?.[0] ?? "")
+
+              return {
+                icon: "△",
+                title: `Protected branch: ${branch}`,
+                body: (
+                  <box paddingLeft={1}>
+                    <text fg={theme.text}>
+                      {`You are about to modify files directly on the protected branch "${branch}". Continue?`}
+                    </text>
+                  </box>
+                ),
+              }
+            }
+
             if (permission === "external_directory") {
               const meta = props.request.metadata ?? {}
               const parent = typeof meta["parentDir"] === "string" ? meta["parentDir"] : undefined
@@ -380,7 +409,7 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
             }
           }
 
-          const current = info()
+          const current = createMemo(info)
 
           const header = () => (
             <box flexDirection="column" gap={0}>
@@ -390,9 +419,9 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
               </box>
               <box flexDirection="row" gap={1} paddingLeft={2} flexShrink={0}>
                 <text fg={theme.textMuted} flexShrink={0}>
-                  {current.icon}
+                  {current().icon}
                 </text>
-                <text fg={theme.text}>{current.title}</text>
+                <text fg={theme.text}>{current().title}</text>
               </box>
             </box>
           )
@@ -401,12 +430,13 @@ export function PermissionPrompt(props: { request: PermissionRequest; directory?
             <Prompt
               title="Permission required"
               header={header()}
-              body={current.body}
-              options={{ once: "Allow once", always: "Allow always", reject: "Reject" }}
+              body={current().body}
+              options={options()}
               escapeKey="reject"
               fullscreen
               onSelect={(option) => {
                 if (option === "always") {
+                  if (props.request.always.length === 0) return
                   setStore("stage", "always")
                   return
                 }
@@ -534,11 +564,12 @@ function Prompt<const T extends Record<string, string>>(props: {
   const { theme } = useTheme()
   const tuiConfig = useTuiConfig()
   const dimensions = useTerminalDimensions()
-  const keys = Object.keys(props.options) as (keyof T)[]
+  const keys = createMemo(() => Object.keys(props.options) as (keyof T)[])
   const [store, setStore] = createStore({
-    selected: keys[0],
+    selected: keys()[0],
     expanded: false,
   })
+  const selected = createMemo(() => (keys().includes(store.selected) ? store.selected : keys()[0]))
   const narrow = createMemo(() => dimensions().width < 80)
   const fullscreenHint = useCommandShortcut("permission.prompt.fullscreen")
 
@@ -570,8 +601,8 @@ function Prompt<const T extends Record<string, string>>(props: {
         desc: "Previous permission option",
         group: "Permission",
         cmd: () => {
-          const idx = keys.indexOf(store.selected)
-          const next = keys[(idx - 1 + keys.length) % keys.length]
+          const idx = keys().indexOf(selected())
+          const next = keys()[(idx - 1 + keys().length) % keys().length]
           setStore("selected", next)
         },
       },
@@ -580,8 +611,8 @@ function Prompt<const T extends Record<string, string>>(props: {
         desc: "Previous permission option",
         group: "Permission",
         cmd: () => {
-          const idx = keys.indexOf(store.selected)
-          const next = keys[(idx - 1 + keys.length) % keys.length]
+          const idx = keys().indexOf(selected())
+          const next = keys()[(idx - 1 + keys().length) % keys().length]
           setStore("selected", next)
         },
       },
@@ -590,8 +621,8 @@ function Prompt<const T extends Record<string, string>>(props: {
         desc: "Next permission option",
         group: "Permission",
         cmd: () => {
-          const idx = keys.indexOf(store.selected)
-          const next = keys[(idx + 1) % keys.length]
+          const idx = keys().indexOf(selected())
+          const next = keys()[(idx + 1) % keys().length]
           setStore("selected", next)
         },
       },
@@ -600,8 +631,8 @@ function Prompt<const T extends Record<string, string>>(props: {
         desc: "Next permission option",
         group: "Permission",
         cmd: () => {
-          const idx = keys.indexOf(store.selected)
-          const next = keys[(idx + 1) % keys.length]
+          const idx = keys().indexOf(selected())
+          const next = keys()[(idx + 1) % keys().length]
           setStore("selected", next)
         },
       },
@@ -609,7 +640,7 @@ function Prompt<const T extends Record<string, string>>(props: {
         key: "return",
         desc: "Select permission option",
         group: "Permission",
-        cmd: () => props.onSelect(store.selected),
+        cmd: () => props.onSelect(selected()),
       },
       ...(props.escapeKey
         ? [
@@ -675,19 +706,19 @@ function Prompt<const T extends Record<string, string>>(props: {
         alignItems={narrow() ? "flex-start" : "center"}
       >
         <box flexDirection="row" gap={1} flexShrink={0}>
-          <For each={keys}>
+          <For each={keys()}>
             {(option) => (
               <box
                 paddingLeft={1}
                 paddingRight={1}
-                backgroundColor={option === store.selected ? theme.warning : theme.backgroundMenu}
+                backgroundColor={option === selected() ? theme.warning : theme.backgroundMenu}
                 onMouseOver={() => setStore("selected", option)}
                 onMouseUp={() => {
                   setStore("selected", option)
                   props.onSelect(option)
                 }}
               >
-                <text fg={option === store.selected ? selectedForeground(theme, theme.warning) : theme.textMuted}>
+                <text fg={option === selected() ? selectedForeground(theme, theme.warning) : theme.textMuted}>
                   {props.options[option]}
                 </text>
               </box>

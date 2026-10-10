@@ -13,7 +13,14 @@ import { SessionMessageUpdater } from "./message-updater"
 import { SessionInput } from "./input"
 import { WorkspaceV2 } from "../workspace"
 import { SessionContextEpoch } from "./context-epoch"
-import { MessageTable, PartTable, SessionInputTable, SessionMessageTable, SessionTable } from "./sql"
+import {
+  MessageTable,
+  PartTable,
+  SessionAuxiliaryUsageTable,
+  SessionInputTable,
+  SessionMessageTable,
+  SessionTable,
+} from "./sql"
 import type { DeepMutable } from "../schema"
 
 type DatabaseService = Database.Interface["db"]
@@ -308,6 +315,14 @@ const layer = Layer.effectDiscard(
           .run()
           .pipe(Effect.orDie)
       }),
+    )
+    yield* events.project(SessionV1.Event.AuxiliaryUsageUpdated, (event) =>
+      db
+        .insert(SessionAuxiliaryUsageTable)
+        .values({ id: event.data.usage.id, session_id: event.data.sessionID, data: event.data.usage })
+        .onConflictDoUpdate({ target: SessionAuxiliaryUsageTable.id, set: { data: event.data.usage } })
+        .run()
+        .pipe(Effect.orDie),
     )
     yield* events.project(SessionV1.Event.PartUpdated, (event) =>
       Effect.gen(function* () {

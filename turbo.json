@@ -39,6 +39,10 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
+    "@opencode-ai/tui#test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
     "@opencode-ai/session-ui#test": {
       "dependsOn": ["^build"],
       "outputs": []
