@@ -355,7 +355,7 @@ are attached to PR #9.
 
 **Feature:** [Issue #7](https://github.com/CMU-17313Q/opencode-f26-WinGit/issues/7)
 **Original implementation:** [PR #12](https://github.com/CMU-17313Q/opencode-f26-WinGit/pull/12)
-**Final verification and Sprint 2 follow-up:** [PR #XX](LINK)
+**Final testing and verification:** [PR #14](https://github.com/CMU-17313Q/opencode-f26-WinGit/pull/14)
 
 ### Overview
 
