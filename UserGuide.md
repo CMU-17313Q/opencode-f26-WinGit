@@ -351,11 +351,68 @@ are attached to PR #9.
 
 ## Protected branch warning
 
-Feature: [Issue #7](https://github.com/CMU-17313Q/opencode-f26-WinGit/issues/7), [PR #12](https://github.com/CMU-17313Q/opencode-f26-WinGit/pull/12).
+**Added by:** Ahmad Pathan
 
-The built-in `edit`, `write` and `apply_patch` tools ask permission before changing files on `main`, `master` or `develop`. In the TUI, the warning names the branch. Choose **Allow once** to continue the current operation or **Reject** to stop it. No always-allow option is offered for this per-operation check.
+**Feature:** [Issue #7](https://github.com/CMU-17313Q/opencode-f26-WinGit/issues/7)
+**Original implementation:** [PR #12](https://github.com/CMU-17313Q/opencode-f26-WinGit/pull/12)
+**Final verification and Sprint 2 follow-up:** [PR #XX](LINK)
 
-To customize the list, add this field to `opencode.json`; it replaces the defaults:
+### Overview
+
+The protected branch safeguard warns users before OpenCode modifies files directly on important Git branches.
+
+The purpose of this feature is to reduce accidental changes to shared branches such as `main`. In a normal feature-branch workflow, developers should usually create a separate branch, make their changes there, review and test them, and only then merge the changes into the shared branch.
+
+OpenCode therefore checks the current Git branch before supported file-modifying tools run. If the current branch is protected, OpenCode requires permission before continuing.
+
+By default, the following branches are protected:
+
+- `main`
+- `master`
+- `develop`
+
+The safeguard currently covers the built-in:
+
+- `edit`
+- `write`
+- `apply_patch`
+
+tools.
+
+It does not attempt to detect arbitrary filesystem changes made through shell commands such as `sed`, `rm`, or shell redirection.
+
+### Basic behavior
+
+When OpenCode attempts to modify a file on a protected branch, it creates a `protected_branch` permission request before the file modification occurs.
+
+For example, if the current branch is `main`, the TUI displays:
+
+```text
+Protected branch: main
+
+You are about to modify files directly on the protected branch "main". Continue?
+```
+
+The user can choose:
+
+- **Allow once** — allow the current modification.
+- **Reject** — cancel the operation.
+
+The protected-branch prompt intentionally does not provide an **Allow always** option. Each protected modification should require its own decision unless the user's existing permission configuration or automatic approval mode changes that behavior.
+
+### Why the check happens before the modification
+
+The protected-branch check is performed before the actual filesystem change.
+
+This is important because rejecting the permission should leave the file exactly as it was before the operation started.
+
+The same ordering also matters when other functionality is involved. For example, the integrated version of OpenCode also supports pre-edit summaries. The protected-branch check runs before summary generation, so rejecting an edit on `main` does not make an unnecessary model request for a summary.
+
+### Configuration
+
+The protected branch list can be customized through `opencode.json`.
+
+For example:
 
 ```json
 {
@@ -364,18 +421,607 @@ To customize the list, add this field to `opencode.json`; it replaces the defaul
 }
 ```
 
-An empty list disables the check. Existing permission configuration can also allow or deny `protected_branch`. The feature uses the local Git branch and configured names, rather than GitHub's protection settings. It does not cover shell commands or other tools.
+When `protected_branches` is provided, it **replaces** the default list.
 
-In non-interactive `opencode run`, an ask request is rejected by default. `--auto`, `--yolo` and `--dangerously-skip-permissions` automatically approve it once, including a known child task's protected-branch request. The TUI's automatic approval mode also approves branch requests without showing a confirmation. Use manual approval mode to see the warning. For a manual check, use a disposable repository on `main`: reject an edit and confirm the file remains unchanged; then allow one edit and confirm it completes. Repeat on a feature branch and check that no branch warning appears. If using `--summary`, rejection should happen before a summary request is made.
+The example above therefore protects:
 
-From `packages/opencode`, run:
+- `main`
+- `production`
 
-```sh
-bun test test/tool/edit.test.ts test/tool/write.test.ts test/tool/apply_patch.test.ts test/agent/agent.test.ts test/cli/run/run-protected-branch.test.ts
-bun typecheck
+but does not automatically protect `master` or `develop`.
+
+An empty list disables the branch safeguard:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "protected_branches": []
+}
 ```
 
-The tool tests cover protected/feature branch checks and rejection before file changes. The patch regression rejects one add/update/delete patch and verifies that all files remain unchanged. The actual CLI tests use a Git repository on `main` with delegated editing, checking auto approval and default rejection, both with and without summaries. The rejection tests also check that no summary provider request is made. These tests use disposable files and local provider fixtures.
+The feature uses the name of the current local Git branch. It does not read or depend on GitHub's repository branch-protection configuration.
+
+### Permission behavior
+
+The default OpenCode permission configuration treats `protected_branch` as:
+
+```text
+ask
+```
+
+This is important because OpenCode has a general permission system controlling whether operations are:
+
+- allowed,
+- denied, or
+- sent to the user for confirmation.
+
+The safeguard explicitly uses the `protected_branch` permission so protected modifications are not silently approved by the general permission rules.
+
+A user can still explicitly override this through their own OpenCode permission configuration.
+
+### TUI behavior
+
+In the TUI, the protected-branch permission is interactive.
+
+On a protected branch, the user sees the branch-specific warning and can select:
+
+```text
+Allow once
+Reject
+```
+
+The interface does not show `Allow always` for this permission because the request does not provide a persistent always-allow pattern.
+
+This makes the warning a per-operation safeguard.
+
+On a normal feature branch such as:
+
+```text
+feature/test
+```
+
+OpenCode does not display the additional protected-branch warning and the normal tool permission flow continues.
+
+### CLI behavior
+
+The safeguard also applies when OpenCode is used through non-interactive `opencode run`.
+
+Because non-interactive execution cannot stop and display the same TUI confirmation prompt, its behavior is slightly different.
+
+Normal:
+
+```sh
+opencode run
+```
+
+rejects a protected-branch request that requires confirmation.
+
+Automatic approval modes such as:
+
+```sh
+opencode run --auto
+```
+
+or:
+
+```sh
+opencode run --yolo
+```
+
+or:
+
+```sh
+opencode run --dangerously-skip-permissions
+```
+
+automatically approve the protected-branch request.
+
+The CLI behavior is also tested when the file modification happens inside a child task/subagent.
+
+Automatic approval modes therefore intentionally bypass the manual confirmation. Users who want to see the warning should use manual permission mode.
+
+### Git edge cases
+
+The safeguard is designed to fail safely when a normal branch name is not available.
+
+#### Non-Git directory
+
+If OpenCode is operating in a directory that is not a Git repository, there is no current Git branch to protect.
+
+In that case:
+
+- no protected-branch warning is shown,
+- the file operation continues normally,
+- OpenCode does not crash or hang.
+
+#### Detached HEAD
+
+Git can also be in a detached HEAD state, where the repository is pointing directly to a commit rather than a named branch.
+
+Because there is no normal branch name such as `main` to compare against the protected list:
+
+- no protected-branch warning is shown,
+- the file operation continues,
+- OpenCode remains usable.
+
+### Supported file-changing paths
+
+The safeguard is connected to all three supported built-in file-changing paths.
+
+#### `edit`
+
+`edit` changes part of an existing file by replacing selected content.
+
+Example:
+
+```text
+old content
+```
+
+may become:
+
+```text
+new content
+```
+
+The protected branch check happens before this change.
+
+#### `write`
+
+`write` writes or replaces the full contents of a file.
+
+This includes both:
+
+- creating a new file, and
+- overwriting an existing file.
+
+The protected branch check also happens before the write.
+
+#### `apply_patch`
+
+`apply_patch` can perform more complex changes such as:
+
+- adding files,
+- editing files,
+- deleting files,
+- moving files,
+- modifying multiple files in one patch.
+
+The safeguard runs before the patch is applied.
+
+A rejection test verifies that if a multi-file patch is rejected on a protected branch:
+
+- existing files remain unchanged,
+- deleted files remain present,
+- new files are not created.
+
+### Manual testing
+
+A simple manual test can be performed using a disposable Git repository.
+
+Create a temporary repository:
+
+```sh
+rm -rf /tmp/opencode-protected-test
+mkdir /tmp/opencode-protected-test
+cd /tmp/opencode-protected-test
+git init
+git branch -M main
+git config user.email "test@example.com"
+git config user.name "Test User"
+echo "hello" > test.txt
+git add test.txt
+git commit -m "initial commit"
+```
+
+Confirm the branch:
+
+```sh
+git branch --show-current
+```
+
+Expected output:
+
+```text
+main
+```
+
+Start the development version of OpenCode against the repository.
+
+From the OpenCode repository:
+
+```sh
+bun dev /tmp/opencode-protected-test
+```
+
+Ask OpenCode to modify the file, for example:
+
+```text
+Change test.txt from "hello" to "hello protected branch test".
+```
+
+#### Manual test 1: protected branch warning
+
+Expected result:
+
+```text
+Protected branch: main
+```
+
+should appear before the file is changed.
+
+The prompt should show:
+
+```text
+Allow once
+Reject
+```
+
+and should not show:
+
+```text
+Allow always
+```
+
+#### Manual test 2: rejection
+
+Choose:
+
+```text
+Reject
+```
+
+Then inspect the file:
+
+```sh
+cat /tmp/opencode-protected-test/test.txt
+```
+
+Expected result:
+
+```text
+hello
+```
+
+The original content should remain unchanged.
+
+#### Manual test 3: approval
+
+Repeat the modification and choose:
+
+```text
+Allow once
+```
+
+Then inspect the file again.
+
+Expected result:
+
+```text
+hello protected branch test
+```
+
+The modification should now succeed.
+
+#### Manual test 4: feature branch
+
+Switch the test repository to a feature branch:
+
+```sh
+cd /tmp/opencode-protected-test
+git switch -c feature/test
+```
+
+Run the same modification again.
+
+Expected result:
+
+- no additional `protected_branch` warning,
+- the normal file operation proceeds.
+
+#### Manual test 5: custom protected branch
+
+Create an `opencode.json` configuration containing:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "protected_branches": ["production"]
+}
+```
+
+Switch to:
+
+```sh
+git switch -c production
+```
+
+A modification should now require the protected-branch confirmation.
+
+If the configuration contains only `production`, `main` is no longer automatically protected because the custom list replaces the defaults.
+
+### Automated tests
+
+The protected branch feature is tested across several files because the feature interacts with tool execution, Git state, the permission system, the TUI, and the CLI.
+
+The main test files are:
+
+| Test file | What it verifies |
+| --- | --- |
+| `packages/opencode/test/tool/write.test.ts` | Default protected branches, feature branches, configuration, approval, rejection, non-Git folders and detached HEAD |
+| `packages/opencode/test/tool/edit.test.ts` | Protected and feature branch behavior for `edit`, rejection, unchanged files and interaction with pre-edit summaries |
+| `packages/opencode/test/tool/apply_patch.test.ts` | Protected and feature branch behavior for patches and rejection of multi-file modifications |
+| `packages/opencode/test/agent/agent.test.ts` | The default `protected_branch` permission evaluates to `ask` |
+| `packages/opencode/test/cli/run/run-protected-branch.test.ts` | Actual CLI behavior with protected branches, child tasks, automatic approval and summaries |
+| `packages/tui/test/cli/tui/permission.test.tsx` | Real TUI rendering and interaction for the protected-branch permission |
+
+### `write` test coverage
+
+The tests in:
+
+```text
+packages/opencode/test/tool/write.test.ts
+```
+
+cover several important branches of the safeguard.
+
+They verify that:
+
+- `main` asks for confirmation.
+- `master` asks for confirmation.
+- `develop` asks for confirmation.
+- a normal feature branch does not ask.
+- a custom branch such as `production` can be protected.
+- custom configuration replaces the default list.
+- an empty `protected_branches` list disables the check.
+- allowing the request lets the write complete.
+- rejecting the request leaves the existing file unchanged.
+- a non-Git directory does not incorrectly ask.
+- detached HEAD does not incorrectly ask.
+
+These tests also inspect the actual resulting file contents instead of only checking the permission request.
+
+### `edit` test coverage
+
+The tests in:
+
+```text
+packages/opencode/test/tool/edit.test.ts
+```
+
+verify that:
+
+- editing on `main` requests protected-branch confirmation,
+- editing on a feature branch does not,
+- rejection leaves the file unchanged.
+
+The integration with `--summary` is also tested.
+
+When summaries are enabled and the protected branch request is rejected, the test verifies:
+
+- the file remains unchanged,
+- no summary provider call is made,
+- no auxiliary summary usage is recorded.
+
+This confirms the protected branch check happens early enough in the edit flow.
+
+### `apply_patch` test coverage
+
+The tests in:
+
+```text
+packages/opencode/test/tool/apply_patch.test.ts
+```
+
+verify both sides of the behavior.
+
+On `main`:
+
+- a protected branch permission request is generated before the patch is applied.
+
+On a normal feature branch:
+
+- no additional protected branch request is created,
+- the patch still applies successfully.
+
+There is also a multi-file rejection regression test.
+
+That test attempts one patch containing:
+
+- a file addition,
+- a file modification,
+- a file deletion.
+
+The protected branch request is rejected, and the test verifies that:
+
+- the modified file keeps its original contents,
+- the file marked for deletion still exists,
+- the new file was never created.
+
+This demonstrates that rejection prevents partial filesystem changes.
+
+### Permission-system test
+
+The test in:
+
+```text
+packages/opencode/test/agent/agent.test.ts
+```
+
+verifies that the default permission configuration evaluates:
+
+```text
+protected_branch
+```
+
+to:
+
+```text
+ask
+```
+
+This ensures the safeguard is not accidentally auto-approved by the general default permission rule.
+
+### TUI test coverage
+
+The tests in:
+
+```text
+packages/tui/test/cli/tui/permission.test.tsx
+```
+
+render the actual permission component.
+
+They verify that the protected branch prompt:
+
+- displays `Protected branch: main`,
+- displays `Allow once`,
+- displays `Reject`,
+- does not display `Allow always`.
+
+The tests also interact with the prompt and verify the actual permission reply sent by the UI.
+
+This complements the lower-level tool tests because it verifies what the user actually sees.
+
+### CLI integration test coverage
+
+The tests in:
+
+```text
+packages/opencode/test/cli/run/run-protected-branch.test.ts
+```
+
+exercise a real `opencode run` workflow using a disposable Git repository on `main`.
+
+The test sends work through a child task that attempts to edit a protected file.
+
+It checks four combinations:
+
+- automatic approval disabled, summaries disabled,
+- automatic approval disabled, summaries enabled,
+- automatic approval enabled, summaries disabled,
+- automatic approval enabled, summaries enabled.
+
+Without automatic approval:
+
+- the protected edit is rejected,
+- the original file content remains unchanged.
+
+With automatic approval:
+
+- the edit succeeds,
+- the file contains the new content.
+
+When summaries are enabled, the tests also verify that a summary is only generated when the protected modification is actually allowed.
+
+### Running the automated tests
+
+From the repository root, run the main OpenCode tests with:
+
+```sh
+bun test --cwd packages/opencode \
+  test/tool/edit.test.ts \
+  test/tool/write.test.ts \
+  test/tool/apply_patch.test.ts \
+  test/agent/agent.test.ts \
+  test/cli/run/run-protected-branch.test.ts
+```
+
+Run the TUI permission tests with:
+
+```sh
+bun test --cwd packages/tui test/cli/tui/permission.test.tsx
+```
+
+Run type checking with:
+
+```sh
+bun run typecheck
+```
+
+### Acceptance criteria coverage
+
+The tests and manual verification together cover the original protected-branch acceptance criteria.
+
+| Acceptance criterion | Verification |
+| --- | --- |
+| Warning appears before modification on a protected branch | `write`, `edit`, `apply_patch`, TUI and CLI tests |
+| Warning identifies the protected branch | TUI permission test and manual TUI test |
+| Rejecting leaves the file unchanged | `write`, `edit`, multi-file `apply_patch`, CLI tests |
+| Confirming allows the modification | `write`, `apply_patch` and manual TUI test |
+| Non-protected branches are unaffected | `write`, `edit`, `apply_patch` feature-branch tests |
+| Custom configuration is respected | custom `production` configuration tests |
+| Non-Git and detached HEAD states are handled safely | `write` edge-case tests |
+| Existing behavior remains unchanged when safeguard does not apply | feature-branch and disabled-configuration tests |
+| Permission system requires confirmation | `agent.test.ts` |
+| User-visible warning works | real TUI permission test |
+| Non-interactive execution behaves safely | CLI integration tests |
+
+### Why the testing is sufficient
+
+The test suite checks the feature at multiple levels instead of testing only the helper function.
+
+At the **tool level**, the tests verify the safeguard on every built-in file-modifying path covered by the feature: `edit`, `write`, and `apply_patch`.
+
+At the **filesystem level**, the tests verify the resulting file contents. This is important because detecting a permission request alone would not prove that rejection actually prevented modification.
+
+At the **configuration level**, the tests cover:
+
+- all three default branch names,
+- custom protected branches,
+- replacement of the defaults,
+- disabling protection with an empty list.
+
+At the **Git-state level**, the tests cover:
+
+- protected branches,
+- normal feature branches,
+- non-Git folders,
+- detached HEAD.
+
+At the **permission-system level**, the tests verify that `protected_branch` defaults to `ask`.
+
+At the **UI level**, the actual TUI permission component is rendered and tested, including the branch-specific message and available actions.
+
+At the **CLI level**, an actual `opencode run` flow verifies both rejection and automatic approval, including a child task and interaction with the `--summary` feature.
+
+Finally, manual testing verifies the complete user experience in a real Git repository.
+
+Together, these tests cover the normal path, rejection path, configuration behavior, edge cases, supported modification tools, TUI behavior, CLI behavior, and integration with another team feature. This provides both regression protection and direct evidence that the implementation satisfies the acceptance criteria.
+
+### Scope and limitations
+
+The safeguard is intentionally limited to OpenCode's built-in:
+
+```text
+edit
+write
+apply_patch
+```
+
+file-modifying tools.
+
+It does not attempt to inspect arbitrary shell commands and determine whether they may modify files.
+
+For example, commands such as:
+
+```sh
+sed -i
+rm
+echo "text" > file.txt
+```
+
+are outside the scope of this feature.
+
+The protected branch names are also local OpenCode configuration. The feature does not query GitHub or GitLab branch-protection rules.
+
+Automatic approval modes intentionally bypass the interactive warning.
+
+For normal interactive usage, the recommended workflow remains:
+
+1. work on a feature branch,
+2. use the protected-branch warning as a safeguard,
+3. review changes before merging into shared branches.
 
 ## `/context`: list the files in the agent's context
 

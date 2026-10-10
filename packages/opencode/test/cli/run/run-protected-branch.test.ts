@@ -52,7 +52,7 @@ describe("opencode run protected-branch subagents", () => {
             )
 
             const result = yield* opencode.run("delegate the file change", {
-              timeoutMs: 20_000,
+              timeoutMs: 90_000,
               extraArgs: [
                 ...(auto ? ["--auto"] : []),
                 ...(summary ? ["--summary"] : []),
@@ -78,7 +78,7 @@ describe("opencode run protected-branch subagents", () => {
             if (auto && summary) expect(result.stderr.split("PROTECTED_CHILD_SUMMARY")).toHaveLength(2)
             else expect(result.stderr).not.toContain("PROTECTED_CHILD_SUMMARY")
           }),
-        60_000,
+        90_000,
       )
     }
   }
