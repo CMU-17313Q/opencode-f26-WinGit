@@ -417,6 +417,37 @@ describe("tool.write", () => {
     )
 
     it.instance(
+      "allows main without protected branch confirmation when configuration is empty",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M main`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "disabled.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "protection disabled",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeUndefined()
+          expect(yield* Effect.promise(() => fs.readFile(filepath, "utf-8"))).toBe("protection disabled")
+        }),
+      {
+        git: true,
+        config: {
+          protected_branches: [],
+        },
+      },
+    )
+
+    it.instance(
       "does not modify the file when protected branch confirmation is rejected",
       () =>
         Effect.gen(function* () {
@@ -527,5 +558,34 @@ describe("tool.write", () => {
         }),
       { git: true },
     )
+
+    it.instance(
+      "asks for confirmation before writing on develop",
+      () =>
+        Effect.gen(function* () {
+          const test = yield* TestInstance
+          yield* Effect.promise(() => $`git branch -M develop`.cwd(test.directory).quiet())
+
+          const { requests, ctx: recordingCtx } = makeRecordingCtx()
+          const filepath = path.join(test.directory, "develop.txt")
+
+          yield* run(
+            {
+              filePath: filepath,
+              content: "develop branch content",
+            },
+            recordingCtx,
+          )
+
+          const request = requests.find((item) => item.permission === "protected_branch")
+
+          expect(request).toBeDefined()
+          expect(request?.patterns).toEqual(["develop"])
+          expect(request?.metadata.branch).toBe("develop")
+        }),
+      { git: true },
+    )
+
+
   })
 })
