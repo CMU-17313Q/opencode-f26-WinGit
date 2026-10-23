@@ -1,0 +1,2 @@
+# An explicit config avoids loading the terminal renderer preload in bunfig.toml.
+# The selected accounting test uses only bun:test and the pure cost helper.

@@ -1,0 +1,66 @@
+name: Session cost mutation
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  mutation:
+    name: session cost mutation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+        working-directory: tools/session-cost-mutation
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "24.15.0"
+          cache: npm
+          cache-dependency-path: tools/session-cost-mutation/package-lock.json
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-download-url: https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64-baseline.zip
+
+      - name: Install mutation tool
+        run: npm ci --ignore-scripts --no-fund --no-audit
+
+      - name: Run original cost tests
+        run: |
+          mkdir -p reports
+          npm run test:baseline 2>&1 | tee reports/baseline.log
+
+      - name: Enforce mutation score
+        run: npm test 2>&1 | tee reports/mutation.log
+
+      - name: Verify weakened tests fail the gate
+        run: npm run verify:gate
+
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: session-cost-mutation-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            packages/tui/reports/mutation
+            tools/session-cost-mutation/reports
