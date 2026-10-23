@@ -1,0 +1,17 @@
+{
+  "name": "wingit-session-cost-mutation",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.11.0"
+  },
+  "scripts": {
+    "test": "cd ../../packages/tui && stryker run",
+    "test:baseline": "cd ../../packages/tui && bun --no-env-file --config=bunfig.mutation.toml test test/util/session-cost.test.ts",
+    "verify:gate": "node verify-gate.mjs"
+  },
+  "devDependencies": {
+    "@stryker-mutator/core": "10.0.0",
+    "typescript": "5.8.2"
+  }
+}

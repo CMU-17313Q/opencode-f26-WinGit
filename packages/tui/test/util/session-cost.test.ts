@@ -250,4 +250,62 @@ describe("session cost accounting", () => {
     expect(formatCost(0.00001)).toBe("<$0.0001")
     expect(formatCost(Number.NaN)).toBe("n/a")
   })
+
+  test("formats invalid charges and the smallest displayed amount consistently", () => {
+    expect(formatCost(-1)).toBe("n/a")
+    expect(formatCost(Number.POSITIVE_INFINITY)).toBe("n/a")
+    expect(formatCost(Number.NEGATIVE_INFINITY)).toBe("n/a")
+    expect(formatCost(0.0001)).toBe("$0.0001")
+  })
+
+  test("invalid token counters do not create negative or infinite usage", () => {
+    const ledger = createSessionCostLedger("session")
+    ledger.hydrate([
+      {
+        info: assistant(),
+        parts: [
+          {
+            ...step(),
+            tokens: {
+              input: -1,
+              output: Number.NaN,
+              reasoning: Number.POSITIVE_INFINITY,
+              cache: { read: Number.NEGATIVE_INFINITY, write: -10 },
+            },
+          },
+        ],
+      },
+    ])
+    expect(ledger.summarize(providers)).toEqual({
+      models: [{ providerID: "paid", modelID: "model", input: 0, output: 0, cost: 0.001 }],
+      total: 0.001,
+      knownTotal: 0.001,
+    })
+  })
+
+  test("model rows have a stable provider and model order regardless of arrival order", () => {
+    const ledger = createSessionCostLedger("session")
+    ledger.hydrate([
+      { info: { ...assistant("third", "z"), modelID: "z" }, parts: [step("third", "third")] },
+      { info: { ...assistant("second", "a"), modelID: "z" }, parts: [step("second", "second")] },
+      { info: { ...assistant("first", "a"), modelID: "a" }, parts: [step("first", "first")] },
+    ])
+    expect(ledger.summarize(providers).models.map((row) => [row.providerID, row.modelID])).toEqual([
+      ["a", "a"],
+      ["a", "z"],
+      ["z", "z"],
+    ])
+  })
+
+  test("a step arriving before its assistant message waits for the model identity", () => {
+    const ledger = createSessionCostLedger("session")
+    expect(ledger.apply(update(step()))).toBeTrue()
+    expect(ledger.summarize(providers)).toEqual({ models: [], total: 0, knownTotal: 0 })
+    ledger.apply({
+      id: "message",
+      type: "message.updated",
+      properties: { sessionID: "session", info: assistant() },
+    })
+    expect(ledger.summarize(providers).total).toBe(0.001)
+  })
 })
