@@ -1,0 +1,40 @@
+name: Documentation Link Check (Lychee)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  link-check:
+    name: Lychee Documentation Links
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check documentation links
+        uses: lycheeverse/lychee-action@v2.9.0
+        with:
+          args: >-
+            --no-progress
+            --max-retries 2
+            --timeout 15
+            --root-dir "${{ github.workspace }}"
+            README.md UserGuide.md
+          output: lychee/report.md
+          fail: true
+
+      - name: Upload link-check report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lychee-report
+          path: lychee/report.md
+          if-no-files-found: warn
+          retention-days: 14
