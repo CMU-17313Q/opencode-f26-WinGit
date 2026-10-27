@@ -53,6 +53,12 @@ runs:
       run: python3 -m pip install setuptools || pip install setuptools || true
       shell: bash
 
+    - name: Install node-gyp
+      shell: bash
+      run: |
+        npm install --global node-gyp@11
+        node-gyp --version
+
     - name: Install dependencies
       run: |
         # Workaround for patched peer variants
