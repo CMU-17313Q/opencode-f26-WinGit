@@ -1,0 +1,9 @@
+{
+  "rules": {
+    "require-name": "error",
+    "name-format": "error",
+    "require-license": "error",
+    "valid-values-license": ["error", ["MIT"]],
+    "no-repeated-dependencies": "warning"
+  }
+}

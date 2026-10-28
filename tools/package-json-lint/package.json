@@ -1,0 +1,13 @@
+{
+  "name": "wingit-package-json-lint",
+  "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "lint": "cd ../.. && npmPkgJsonLint --configFile .npmpackagejsonlintrc.json ./package.json \"./packages/*/package.json\" \"./packages/console/*/package.json\" \"./packages/stats/*/package.json\" ./packages/sdk/js/package.json"
+  },
+  "devDependencies": {
+    "npm-package-json-lint": "11.0.0"
+  }
+}
