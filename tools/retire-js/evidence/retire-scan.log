@@ -1,0 +1,4 @@
+
+> scan
+> retire --path ../.. --outputformat json --outputpath reports/retire.json --exitwith 0
+

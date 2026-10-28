@@ -1,0 +1,14 @@
+{
+  "name": "wingit-retire-js",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "scan": "retire --path ../.. --outputformat json --outputpath reports/retire.json --exitwith 0"
+  },
+  "devDependencies": {
+    "retire": "5.3.0"
+  }
+}
