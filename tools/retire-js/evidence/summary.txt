@@ -1,0 +1,6 @@
+Retire.js 5.3.0: 5 vulnerable component(s)
+- axios@1.16.1: 21 advisory(ies), severity high
+- DOMPurify@3.3.1: 19 advisory(ies), severity medium
+- protobufjs@7.6.2: 2 advisory(ies), severity medium
+- jquery@1.9.1: 5 advisory(ies), severity medium
+- jquery@2.2.0: 5 advisory(ies), severity medium
