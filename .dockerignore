@@ -1,0 +1,2 @@
+# Keep local secrets out of the Docker image (the Dockerfile copies the whole repo).
+.env
