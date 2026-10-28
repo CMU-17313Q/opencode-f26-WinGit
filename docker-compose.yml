@@ -4,3 +4,6 @@ services:
     ports:
       - '127.0.0.1:4096:4096'
     restart: unless-stopped
+    environment:
+      # Shared course OpenRouter key, passed in by the deploy workflow from a GitHub secret. Never commit it.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?OPENROUTER_API_KEY must be set}
