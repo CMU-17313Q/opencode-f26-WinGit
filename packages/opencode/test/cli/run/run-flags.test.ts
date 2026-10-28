@@ -3,7 +3,7 @@ import yargs from "yargs"
 import { RunCommand } from "../../../src/cli/cmd/run"
 
 async function parse(argv: string[]) {
-  return yargs([])
+  return yargs([], process.cwd())
     .command({ ...RunCommand, handler: () => {} })
     .exitProcess(false)
     .parse(argv)
