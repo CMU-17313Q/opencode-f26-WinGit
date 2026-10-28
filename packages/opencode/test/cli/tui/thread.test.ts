@@ -53,7 +53,7 @@ describe("tui thread", () => {
 
   test("parses supported --no-replay forms", async () => {
     for (const option of ["--no-replay", "--no-replay=true", "--noReplay"]) {
-      const args = await yargs([])
+      const args = await yargs([], process.cwd())
         .command({ ...TuiThreadCommand, handler: () => {} })
         .exitProcess(false)
         .parse(["--mini", option, "--replay-limit", "10"])
@@ -64,7 +64,7 @@ describe("tui thread", () => {
   })
 
   test("preserves boolean negation for existing options", async () => {
-    const args = await yargs([])
+    const args = await yargs([], process.cwd())
       .command({ ...TuiThreadCommand, handler: () => {} })
       .exitProcess(false)
       .parse(["--mdns", "--no-mdns"])
