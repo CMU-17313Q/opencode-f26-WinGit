@@ -1,0 +1,16 @@
+{
+  "name": "wingit-madge",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "check": "node check-cycles.mjs ../../packages/tui/src",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "madge": "8.0.0",
+    "typescript": "5.9.3"
+  }
+}

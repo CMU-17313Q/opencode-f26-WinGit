@@ -1,0 +1,6 @@
+{
+  "description": "Known circular imports in packages/tui/src. The check fails only for cycles that are not listed here.",
+  "cycles": [
+    "component/dialog-model.tsx > component/dialog-provider.tsx"
+  ]
+}
