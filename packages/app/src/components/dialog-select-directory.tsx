@@ -8,6 +8,10 @@ import { createMemo, createResource, createSignal } from "solid-js"
 import { useLanguage } from "@/context/language"
 import { ServerConnection } from "@/context/server"
 import { useGlobal } from "@/context/global"
+import { usePlatform } from "@/context/platform"
+import { authTokenFromCredentials } from "@/utils/server"
+import { Button } from "@opencode-ai/ui/button"
+import { TextField } from "@opencode-ai/ui/text-field"
 import { cleanPickerInput, createDirectorySearch, displayPickerPath } from "./directory-picker-domain"
 import type { Path } from "@opencode-ai/sdk/v2/client"
 
@@ -55,6 +59,7 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
   const { sync, sdk, ...serverCtx } = global.ensureServerCtx(props.server)
   const dialog = useDialog()
   const language = useLanguage()
+  const platform = usePlatform()
 
   const [filter, setFilter] = createSignal("")
   let list: ListRef | undefined
@@ -128,6 +133,35 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
     dialog.close()
   }
 
+  const [cloneUrl, setCloneUrl] = createSignal("")
+  const [cloneError, setCloneError] = createSignal<string>()
+  const [cloning, setCloning] = createSignal(false)
+
+  // Clones a public https repo into ~/projects/<name> on the server, then opens it like a picked folder.
+  async function clone(event: SubmitEvent) {
+    event.preventDefault()
+    const url = cloneUrl().trim()
+    if (!url || cloning()) return
+    setCloning(true)
+    setCloneError(undefined)
+    const http = props.server.http
+    const result = await (platform.fetch ?? globalThis.fetch)(new URL("/experimental/clone", http.url), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(http.password
+          ? { Authorization: `Basic ${authTokenFromCredentials({ username: http.username, password: http.password })}` }
+          : {}),
+      },
+      body: JSON.stringify({ url }),
+    })
+      .then(async (response) => ({ ok: response.ok, body: await response.json().catch(() => ({})) }))
+      .catch((error: unknown) => ({ ok: false, body: { error: String(error) } }))
+    setCloning(false)
+    if (result.ok && typeof result.body.directory === "string") return resolve(result.body.directory)
+    setCloneError(typeof result.body.error === "string" ? result.body.error : "Clone failed")
+  }
+
   return (
     <Dialog title={props.title ?? language.t("command.project.open")}>
       <List
@@ -195,6 +229,23 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
           )
         }}
       </List>
+      <form class="flex items-start gap-2 px-3 pb-3 pt-2 border-t border-border-weak-base" onSubmit={clone}>
+        <TextField
+          class="grow"
+          label="Clone from git URL"
+          placeholder="https://github.com/owner/repo.git"
+          description="Public HTTPS repos only. Cloned into ~/projects on the server."
+          value={cloneUrl()}
+          onChange={setCloneUrl}
+          error={cloneError()}
+          validationState={cloneError() ? "invalid" : undefined}
+          disabled={cloning()}
+          spellcheck={false}
+        />
+        <Button type="submit" variant="primary" size="large" class="mt-6" disabled={cloning() || !cloneUrl().trim()}>
+          {cloning() ? "Cloning..." : "Clone"}
+        </Button>
+      </form>
     </Dialog>
   )
 }
