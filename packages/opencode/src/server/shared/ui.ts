@@ -3,6 +3,7 @@ import { Effect, Stream } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createHash } from "node:crypto"
 import { ProxyUtil } from "../proxy-util"
+import path from "node:path"
 
 let embeddedUIPromise: Promise<Record<string, string> | null> | undefined
 
@@ -75,10 +76,35 @@ export function serveEmbeddedUIEffect(
   )
 }
 
+function serveLocalUIEffect(request: HttpServerRequest.HttpServerRequest) {
+  return Effect.promise(async () => {
+    const root = path.resolve(process.env.OPENCODE_LOCAL_WEB_UI_DIR!)
+    const pathname = new URL(request.url, "http://localhost").pathname
+    const file = path.resolve(root, "." + pathname)
+
+    if (file !== root && !file.startsWith(root + path.sep)) {
+      return notFound()
+    }
+
+    const target = (await Bun.file(file).exists())
+      ? file
+      : path.join(root, "index.html")
+
+    if (!(await Bun.file(target).exists())) return notFound()
+
+    const body = new Uint8Array(await Bun.file(target).arrayBuffer())
+    return embeddedUIResponse(target, body)
+  })
+}
+
+
 export function serveUIEffect(
   request: HttpServerRequest.HttpServerRequest,
   services: { fs: FSUtil.Interface; client: HttpClient.HttpClient; disableEmbeddedWebUi: boolean },
 ) {
+  if (process.env.OPENCODE_LOCAL_WEB_UI_DIR) {
+    return serveLocalUIEffect(request)
+  }
   return Effect.gen(function* () {
     const embeddedWebUI = yield* Effect.promise(() => embeddedUI(services.disableEmbeddedWebUi))
     const path = new URL(request.url, "http://localhost").pathname
