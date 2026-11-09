@@ -57,6 +57,10 @@ jobs:
             turbo-${{ runner.os }}-${{ hashFiles('turbo.json', '**/package.json') }}-
             turbo-${{ runner.os }}-
 
+      - name: Run session cost properties
+        working-directory: packages/tui
+        run: GITHUB_ACTIONS=false bun test --timeout 30000 test/context/session-cost.property.test.tsx test/util/session-cost.property.test.ts
+
       - name: Run unit tests
         timeout-minutes: 15
         # Default turbo concurrency (10) oversubscribes ubuntu-latest's 4

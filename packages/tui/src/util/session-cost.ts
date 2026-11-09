@@ -124,7 +124,7 @@ export function createSessionCostLedger(sessionID: string) {
 
   function summarize(providers: readonly CostProvider[]): SessionCostSummary {
     const models = new Map<string, SessionCostSummary["models"][number]>()
-    let knownTotal = 0
+    const charges: { model: SessionCostSummary["models"][number]; cost: number }[] = []
     function add(
       providerID: string,
       modelID: string,
@@ -141,9 +141,9 @@ export function createSessionCostLedger(sessionID: string) {
       const cost = record.cost
       const known =
         cost !== undefined && Number.isFinite(cost) && cost >= 0 && (cost > 0 || priced(providerID, modelID, providers))
-      if (known) knownTotal += cost
+      if (known) charges.push({ model, cost })
       const complete = record.tokens !== undefined && (record.status === undefined || record.status === "complete")
-      model.cost = model.cost !== undefined && known && complete ? model.cost + cost : undefined
+      if (!known || !complete) model.cost = undefined
       models.set(key, model)
     }
     for (const item of messages.values()) {
@@ -155,6 +155,13 @@ export function createSessionCostLedger(sessionID: string) {
       for (const record of records) add(info.providerID, info.modelID, record)
     }
     for (const record of auxiliary.values()) add(record.providerID, record.modelID, record)
+
+    // A fixed summation order keeps rounding stable when completed records arrive in a different order.
+    let knownTotal = 0
+    for (const charge of charges.sort((a, b) => a.cost - b.cost)) {
+      knownTotal += charge.cost
+      if (charge.model.cost !== undefined) charge.model.cost += charge.cost
+    }
     const rows = [...models.values()].sort(
       (a, b) => a.providerID.localeCompare(b.providerID) || a.modelID.localeCompare(b.modelID),
     )

@@ -3,19 +3,28 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { For, Match, Switch, Show } from "solid-js"
 import { useTheme } from "../context/theme"
 import { useSessionCost } from "../context/session-cost"
+import { useSync } from "../context/sync"
 import { formatCost, type SessionCostSummary } from "../util/session-cost"
 import { useDialog } from "../ui/dialog"
 
 export function DialogCost(props: { sessionID: string }) {
   const dialog = useDialog()
   const cost = useSessionCost(() => props.sessionID)
+  const sync = useSync()
 
   return (
-    <CostView summary={cost.summary()} loading={cost.loading()} error={cost.error()} onClose={() => dialog.clear()} />
+    <CostView
+      sessionTitle={sync.session.get(props.sessionID)?.title || props.sessionID}
+      summary={cost.summary()}
+      loading={cost.loading()}
+      error={cost.error()}
+      onClose={() => dialog.clear()}
+    />
   )
 }
 
 export function CostView(props: {
+  sessionTitle?: string
   summary?: SessionCostSummary
   loading: boolean
   error: boolean
@@ -26,15 +35,24 @@ export function CostView(props: {
 
   return (
     <box paddingLeft={2} paddingRight={2} paddingBottom={1} gap={1}>
-      <box flexDirection="row" justifyContent="space-between">
-        <text fg={theme.text} attributes={TextAttributes.BOLD}>
-          Session cost
-        </text>
-        <text fg={theme.textMuted} onMouseUp={props.onClose}>
-          esc
-        </text>
+      <box>
+        <box flexDirection="row" justifyContent="space-between">
+          <text fg={theme.text} attributes={TextAttributes.BOLD}>
+            Session cost
+          </text>
+          <text fg={theme.textMuted} onMouseUp={props.onClose}>
+            esc
+          </text>
+        </box>
+        <Show when={props.sessionTitle}>
+          {(title) => (
+            <text fg={theme.textMuted} height={1} wrapMode="none" truncate>
+              Session: {title()}
+            </text>
+          )}
+        </Show>
       </box>
-      <scrollbox maxHeight={Math.max(3, Math.floor(dimensions().height * 0.75) - 4)}>
+      <scrollbox maxHeight={Math.max(3, Math.floor(dimensions().height * 0.75) - (props.sessionTitle ? 5 : 4))}>
         <box gap={1}>
           <Switch>
             <Match when={props.loading}>
