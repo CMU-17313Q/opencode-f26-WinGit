@@ -107,6 +107,11 @@ async function summarizer(prompts: string[], reply: string) {
 const seenContent = (prompt: string, filePath: string) =>
   prompt.slice(prompt.indexOf(`File: ${filePath}\n\n`) + `File: ${filePath}\n\n`.length)
 
+// `bun test --only-failures` (the package's test script) hides passing tests, so each property prints one line
+// when it passes. That keeps the properties visible in the CI log.
+const announce = (name: string, numRuns: number) =>
+  console.log(`[property] ${name}: ${numRuns} generated inputs passed`)
+
 // Generator choices:
 // - fileName: realistic names with the extensions the feature is used on (ts, py, txt).
 // - fileContent: half arbitrary text, half code-like text built from the characters real source files are made of
@@ -140,6 +145,7 @@ describe("--summary properties: what the model is given", () => {
       }),
       { numRuns: 100 },
     )
+    announce("R1/R3: any file under the size limit reaches the model verbatim", 100)
   })
 
   // R2: "Running --summary twice on the same unchanged file gives summaries with the same gist (same purpose and
@@ -159,6 +165,7 @@ describe("--summary properties: what the model is given", () => {
       }),
       { numRuns: 40 },
     )
+    announce("R2: summarizing the same unchanged file twice sends identical requests", 40)
   })
 
   // R3: "The summary describes the file as it currently is: content that is still in the file stays in the summary,
@@ -190,6 +197,7 @@ describe("--summary properties: what the model is given", () => {
       ),
       { numRuns: 100 },
     )
+    announce("R3: text removed from a file is absent from the request, text kept is present", 100)
   })
 
   // R4: "A long file may make the summary slower, but it must not block the edit." The cap on what is sent keeps
@@ -210,6 +218,7 @@ describe("--summary properties: what the model is given", () => {
       }),
       { numRuns: 40 },
     )
+    announce("R4: the content sent is capped at the limit plus a truncation marker", 40)
   })
 
   // R7: "Across file sizes, the request asks for the same purpose and 3-6 sentence form." (the revised wording)
@@ -229,6 +238,7 @@ describe("--summary properties: what the model is given", () => {
       }),
       { numRuns: 40 },
     )
+    announce("R7: the 3-6 sentence instruction does not depend on file size or name", 40)
   })
 })
 
@@ -250,6 +260,7 @@ describe("--summary properties: what the user is shown", () => {
       ),
       { numRuns: 50 },
     )
+    announce("R1/R5: the text shown is the model's reply, trimmed, whatever the padding", 50)
   })
 })
 
@@ -386,6 +397,7 @@ describe("--summary properties: the edit itself", () => {
           { numRuns: 25 },
         ),
       )
+      announce("R1/R4/R5: the edited file is identical with the flag off, on, and on with a failing provider", 25)
     }),
   )
 })
