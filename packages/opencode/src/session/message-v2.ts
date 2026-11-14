@@ -1,3 +1,4 @@
+import path from "path"
 import { SessionID, MessageID, PartID } from "./schema"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -74,17 +75,27 @@ export function contextFiles(messages: readonly WithParts[]) {
   // Compaction moves its summary ahead of the retained tail. Display first
   // appearance chronologically without mutating the model's replay ordering.
   for (const message of messages.toSorted((a, b) => (isAfter(a.info, b.info) ? 1 : isAfter(b.info, a.info) ? -1 : 0))) {
-    if (!replayAssistant(message)) continue
+    if (!replayAssistant(message) || message.info.role !== "assistant") continue
     for (const part of message.parts) {
       if (part.type !== "tool") continue
-      const path = part.state.input.filePath
-      if (typeof path !== "string" || !path) continue
+      const filePath = part.state.input.filePath
+      if (typeof filePath !== "string" || !filePath) continue
       const content = fileToolText(part)
       if (content === undefined) continue
-      files.set(path, (files.get(path) ?? 0) + content.length)
+      const key = contextPath(message.info.path.cwd, filePath)
+      files.set(key, (files.get(key) ?? 0) + content.length)
     }
   }
   return Array.from(files, ([path, length]) => ({ path, tokens: Math.ceil(length / 4) }))
+}
+
+// The read, edit and write tools resolve relative paths against the session directory, so "a.ts", "./a.ts" and
+// "<cwd>/a.ts" open the same file. Key on that one file, shown relative to the directory when it is inside it.
+function contextPath(cwd: string, filePath: string) {
+  const absolute = path.resolve(cwd, filePath)
+  const relative = path.relative(cwd, absolute)
+  if (!relative || relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) return absolute
+  return relative
 }
 
 function fileToolText(part: SessionV1.ToolPart) {
