@@ -266,7 +266,11 @@ export function Prompt(props: PromptProps) {
     const limit = selected
       ? sync.data.provider.find((item) => item.id === selected.providerID)?.models[selected.modelID]?.limit.context
       : undefined
-    const context = contextUsage(sync.data.message[props.sessionID] ?? [], limit) ?? {
+    const context = contextUsage(
+      sync.data.message[props.sessionID] ?? [],
+      limit,
+      sync.session.get(props.sessionID)?.revert?.messageID,
+    ) ?? {
       used: 0,
       total: limit || undefined,
       percent: limit ? 0 : undefined,
