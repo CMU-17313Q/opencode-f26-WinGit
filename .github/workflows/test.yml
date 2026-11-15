@@ -64,6 +64,11 @@ jobs:
         # contention issue typecheck.yml already caps for tsgo.
         run: GITHUB_ACTIONS=false bun turbo test --concurrency=4
 
+      - name: Run context meter properties
+        if: ${{ !cancelled() }}
+        working-directory: packages/tui
+        run: GITHUB_ACTIONS=false bun test --timeout 30000 test/util/context-usage.property.test.ts
+
       - name: Check generated client
         timeout-minutes: 5
         working-directory: packages/client
