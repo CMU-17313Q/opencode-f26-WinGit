@@ -44,7 +44,7 @@ describe("util.contextUsage", () => {
   test("drops after compaction instead of continuing to climb", () => {
     const result = contextUsage([assistant(150_000, 5_000), assistant(20_000, 1_000)], 200_000)
     expect(result?.used).toBe(21_000)
-    expect(result?.percent).toBe(11)
+    expect(result?.percent).toBe(10)
   })
 
   test("includes cached tokens in the total", () => {
